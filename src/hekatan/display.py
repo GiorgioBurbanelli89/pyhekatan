@@ -143,7 +143,8 @@ def eq(name: str, value: Any, unit: str = ""):
     elif mode == "standalone":
         unit_html = f' <span class="unit">{_format_unit(unit)}</span>' if unit else ""
         display_name = _format_subscript(name)
-        html = f'<div class="eq"><var>{display_name}</var> = <b>{value}</b>{unit_html}</div>'
+        value_html = _format_expr(str(value))
+        html = f'<div class="eq"><var>{display_name}</var> = <b>{value_html}</b>{unit_html}</div>'
         _BUFFER.append(html)
 
     else:  # console
@@ -180,9 +181,10 @@ def var(name: str, value: Any, unit: str = "", desc: str = ""):
 
     elif mode == "standalone":
         display_name = _format_subscript(name)
+        value_html = _format_expr(str(value))
         unit_html = f' <span class="unit">{_format_unit(unit)}</span>' if unit else ""
         desc_html = f' <span class="desc">{desc}</span>' if desc else ""
-        html = f'<div class="eq"><var>{display_name}</var> = <b>{value}</b>{unit_html}{desc_html}</div>'
+        html = f'<div class="eq"><var>{display_name}</var> = <b>{value_html}</b>{unit_html}{desc_html}</div>'
         _BUFFER.append(html)
 
     else:  # console
@@ -583,14 +585,22 @@ def sqrt(expr: str, name: Optional[str] = None, index: Optional[int] = None):
 
     elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
-        expr_html = _format_subscript(expr)
-        index_html = f'<sup class="sqrt-index">{index}</sup>' if index else ""
+        expr_html = _format_expr(expr)
+
+        if index:
+            # Nth root: &hairsp;<sup class="nth">n</sup>&hairsp;&hairsp;<span class="o0">...
+            pad = f'&hairsp;<sup class="nth">{index}</sup>&hairsp;&hairsp;'
+        else:
+            # Square root: &ensp;&hairsp;&hairsp;<span class="o0">...
+            pad = '&ensp;&hairsp;&hairsp;'
 
         html = (
             f'<div class="eq">{name_html}'
-            f'{index_html}'
-            f'<span class="sqrt-sym">&radic;</span>'
-            f'<span class="sqrt-body">{expr_html}</span>'
+            f'{pad}'
+            f'<span class="o0">'
+            f'<span class="r">\u221A</span>&hairsp;'
+            f'{expr_html}'
+            f'</span>'
             f'</div>'
         )
         _BUFFER.append(html)
@@ -777,6 +787,59 @@ def heading(text_content: str, level: int = 2):
     title(text_content, level)
 
 
+def table(data: List[List[Any]], header: bool = True):
+    """
+    Display a formatted table.
+
+    Args:
+        data: 2D list [[row1], [row2], ...]
+              First row is treated as header if header=True.
+        header: If True, first row is rendered as header (bold, shaded).
+
+    Example:
+        table([
+            ["Method", "w (mm)", "Error %"],
+            ["FEM", "-6.635", "0.13"],
+            ["SAP2000", "-6.529", "ref"],
+        ])
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        rows_str = ";".join(",".join(str(x) for x in row) for row in data)
+        marker = f"@@HEKATAN:TABLE:{rows_str}"
+        print(marker)
+
+    elif mode == "standalone":
+        html_parts = ['<table class="hekatan-table">']
+
+        for r_idx, row in enumerate(data):
+            html_parts.append("<tr>")
+            tag = "th" if (r_idx == 0 and header) else "td"
+            for cell in row:
+                cell_html = _format_subscript(str(cell))
+                html_parts.append(f"<{tag}>{cell_html}</{tag}>")
+            html_parts.append("</tr>")
+
+        html_parts.append("</table>")
+        _BUFFER.append("".join(html_parts))
+
+    else:  # console
+        if not data:
+            return
+        col_widths = []
+        for j in range(len(data[0])):
+            w = max(len(str(data[i][j])) for i in range(len(data)))
+            col_widths.append(w)
+
+        for i, row in enumerate(data):
+            cells = " | ".join(str(row[j]).ljust(col_widths[j]) for j in range(len(row)))
+            print(f"| {cells} |")
+            if i == 0 and header:
+                sep = "-+-".join("-" * w for w in col_widths)
+                print(f"+-{sep}-+")
+
+
 def text(content: str):
     """Display plain text or markdown."""
     mode = _get_mode()
@@ -785,7 +848,7 @@ def text(content: str):
         print(f"@@HEKATAN:TEXT:{content}")
 
     elif mode == "standalone":
-        _BUFFER.append(f"<p>{content}</p>")
+        _BUFFER.append(f"<p>{_greek(content)}</p>")
 
     else:
         print(content)
@@ -863,6 +926,30 @@ def _format_subscript(name: str) -> str:
         parts = name.split("_", 1)
         return f"{parts[0]}<sub>{_greek(parts[1])}</sub>"
     return name
+
+
+def _format_expr(expr: str) -> str:
+    """Format a math expression: split by operators, apply subscript/Greek to each token.
+
+    Unlike _format_subscript, this handles compound expressions like 'a^2 + b^2'
+    by splitting on operators (+, -, *, /) and formatting each part individually.
+    """
+    if not expr:
+        return expr
+    # Split by math operators while keeping the delimiters
+    import re as _re
+    tokens = _re.split(r'(\s*[+\-*/=<>]\s*|\s*\*\*\s*)', expr)
+    result = []
+    for token in tokens:
+        stripped = token.strip()
+        if stripped in ('+', '-', '*', '/', '=', '<', '>', '**'):
+            # It's an operator, keep as-is with spacing
+            result.append(f' {stripped} ' if stripped != '*' else ' &middot; ')
+        elif not stripped:
+            result.append(token)
+        else:
+            result.append(_format_subscript(stripped))
+    return ''.join(result)
 
 
 # ============================================================
@@ -1241,24 +1328,60 @@ p { margin: 6px 0; }
 }
 
 /* ============================================
-   Square root
+   Square root (matches Hekatan Calc template)
    ============================================ */
-.sqrt-sym {
-    font-size: 130%;
+.o0 {
+    display: inline-block;
+    border-top: solid 0.75pt;
+    line-height: 130%;
     vertical-align: middle;
+    margin-top: 0.75pt;
+    padding-top: 1.25pt;
+    padding-left: 1pt;
+    padding-right: 1pt;
+}
+
+.r {
+    font-family: 'Times New Roman', Times, serif;
+    font-size: 150%;
+    display: inline-block;
+    vertical-align: top;
+    margin-left: -9.5pt;
+    position: relative;
+    top: 1pt;
+}
+
+.nth {
+    position: relative;
+    bottom: 1pt;
+}
+
+.eq small.nth { font-size: 70%; }
+
+/* ============================================
+   Table
+   ============================================ */
+.hekatan-table {
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 10.5pt;
+}
+
+.hekatan-table th,
+.hekatan-table td {
+    border: 1px solid #ccc;
+    padding: 4px 10px;
+    text-align: center;
+}
+
+.hekatan-table th {
+    background: #f0f0f0;
+    font-weight: 600;
     color: #333;
 }
 
-.sqrt-body {
-    display: inline-block;
-    border-top: solid 1pt black;
-    padding: 0 4px 0 2px;
-    vertical-align: middle;
-}
-
-.sqrt-index {
-    font-size: 65%;
-    margin-right: -4px;
-    vertical-align: super;
+.hekatan-table tr:nth-child(even) {
+    background: #fafafa;
 }
 """

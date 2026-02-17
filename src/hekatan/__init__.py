@@ -16,10 +16,11 @@ Usage:
     show()  # Opens HTML in browser (standalone mode)
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 from hekatan.display import (
     matrix,
+    table,
     eq,
     var,
     fraction,
