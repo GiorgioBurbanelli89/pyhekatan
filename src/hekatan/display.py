@@ -82,14 +82,15 @@ def _matrix_to_html(data: List[List[Any]], name: Optional[str] = None) -> str:
     """Generate HTML for a matrix using Hekatan CSS classes."""
     rows_html = []
     for row in data:
-        cells = "".join(f'<td class="td">{x}</td>' for x in row)
+        cells = "".join(f'<td class="td">{_format_subscript(str(x))}</td>' for x in row)
         # Empty first/last cells create bracket effect
         rows_html.append(f'<tr class="tr"><td class="td"></td>{cells}<td class="td"></td></tr>')
 
     table = f'<table class="matrix">{"".join(rows_html)}</table>'
 
     if name:
-        return f'<div class="eq"><var>{name}</var> = {table}</div>'
+        display_name = _format_subscript(name)
+        return f'<div class="eq"><var>{display_name}</var> = {table}</div>'
     return f'<div class="eq">{table}</div>'
 
 
@@ -129,7 +130,7 @@ def eq(name: str, value: Any, unit: str = ""):
 
     Example:
         eq("F", 25.5, "kN")
-        eq("A_s", 1256.64, "mm²")
+        eq("A_s", 1256.64, "mm^2")
     """
     mode = _get_mode()
 
@@ -140,8 +141,7 @@ def eq(name: str, value: Any, unit: str = ""):
         print(marker)
 
     elif mode == "standalone":
-        unit_html = f' <span class="unit">{unit}</span>' if unit else ""
-        # Handle subscripts: A_s -> A<sub>s</sub>
+        unit_html = f' <span class="unit">{_format_unit(unit)}</span>' if unit else ""
         display_name = _format_subscript(name)
         html = f'<div class="eq"><var>{display_name}</var> = <b>{value}</b>{unit_html}</div>'
         _BUFFER.append(html)
@@ -180,8 +180,8 @@ def var(name: str, value: Any, unit: str = "", desc: str = ""):
 
     elif mode == "standalone":
         display_name = _format_subscript(name)
-        unit_html = f' <span class="unit">{unit}</span>' if unit else ""
-        desc_html = f' <span class="desc">— {desc}</span>' if desc else ""
+        unit_html = f' <span class="unit">{_format_unit(unit)}</span>' if unit else ""
+        desc_html = f' <span class="desc">{desc}</span>' if desc else ""
         html = f'<div class="eq"><var>{display_name}</var> = <b>{value}</b>{unit_html}{desc_html}</div>'
         _BUFFER.append(html)
 
@@ -205,7 +205,7 @@ def fraction(numerator: Any, denominator: Any, name: Optional[str] = None):
         name: Optional name for the result
 
     Example:
-        fraction("M_u", "phi * b * d²", "R_n")
+        fraction("M_u", "phi * b * d^2", "R_n")
     """
     mode = _get_mode()
 
@@ -215,11 +215,13 @@ def fraction(numerator: Any, denominator: Any, name: Optional[str] = None):
 
     elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        num_html = _format_subscript(str(numerator))
+        den_html = _format_subscript(str(denominator))
         html = (
             f'<div class="eq">{name_html}'
             f'<span class="dvc">'
-            f'<span class="dvl">{numerator}</span>'
-            f'<span class="dvl">{denominator}</span>'
+            f'<span class="dvl">{num_html}</span>'
+            f'<span class="dvl">{den_html}</span>'
             f'</span></div>'
         )
         _BUFFER.append(html)
@@ -232,6 +234,94 @@ def fraction(numerator: Any, denominator: Any, name: Optional[str] = None):
         print(f"{prefix}{num_str.center(width)}")
         print(f"{' ' * len(prefix)}{'-' * width}")
         print(f"{' ' * len(prefix)}{den_str.center(width)}")
+
+
+# ============================================================
+# Integral display (new in 0.2.0)
+# ============================================================
+
+def integral(integrand: str, variable: str = "x",
+             lower: Optional[str] = None, upper: Optional[str] = None,
+             name: Optional[str] = None):
+    """
+    Display an integral expression.
+
+    Args:
+        integrand: The expression to integrate (e.g. "sigma_x")
+        variable: Integration variable (e.g. "z")
+        lower: Lower limit (e.g. "-h/2")
+        upper: Upper limit (e.g. "h/2")
+        name: Optional result name (e.g. "N_x")
+
+    Example:
+        integral("sigma_x", "z", "-h/2", "h/2", "N_x")
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        marker = f"@@HEKATAN:INTEGRAL:{name or ''}={integrand}|{variable}"
+        if lower and upper:
+            marker += f"|{lower}|{upper}"
+        print(marker)
+
+    elif mode == "standalone":
+        name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        integrand_html = _format_subscript(integrand)
+        var_html = _format_subscript(variable)
+
+        if lower and upper:
+            integral_sym = (
+                f'<span class="nary-wrap">'
+                f'<span class="nary-sup">{_format_subscript(upper)}</span>'
+                f'<span class="nary">&#8747;</span>'
+                f'<span class="nary-sub">{_format_subscript(lower)}</span>'
+                f'</span>'
+            )
+        else:
+            integral_sym = '<span class="nary">&#8747;</span>'
+
+        html = (
+            f'<div class="eq">{name_html}'
+            f'{integral_sym}'
+            f'<var>{integrand_html}</var>'
+            f'<span class="dot-sep">&middot;</span>'
+            f'd<var>{var_html}</var></div>'
+        )
+        _BUFFER.append(html)
+
+    else:  # console
+        prefix = f"{name} = " if name else ""
+        if lower and upper:
+            print(f"{prefix}integral({integrand}, {variable}, {lower}, {upper})")
+        else:
+            print(f"{prefix}integral({integrand}, {variable})")
+
+
+# ============================================================
+# Equation number (reference tag)
+# ============================================================
+
+def eq_num(tag: str):
+    """Add an equation number reference like (1.2) to the last equation."""
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        print(f"@@HEKATAN:EQNUM:{tag}")
+
+    elif mode == "standalone":
+        html = f'<span class="eq-num">({tag})</span>'
+        # Modify last buffer entry to append the eq number
+        if _BUFFER:
+            last = _BUFFER[-1]
+            if last.endswith("</div>"):
+                _BUFFER[-1] = last[:-6] + html + "</div>"
+            else:
+                _BUFFER.append(html)
+        else:
+            _BUFFER.append(html)
+
+    else:
+        print(f"  ({tag})")
 
 
 # ============================================================
@@ -330,19 +420,41 @@ def _generate_html() -> str:
 # ============================================================
 
 def _format_subscript(name: str) -> str:
-    """Convert A_s to A<sub>s</sub>."""
+    """Convert A_s to A<sub>s</sub> and handle superscripts like x^2."""
+    if not name:
+        return name
+    # Handle superscripts: x^2 -> x<sup>2</sup>
+    if "^" in name:
+        parts = name.split("^", 1)
+        base = _format_subscript(parts[0])  # recurse for subscripts in base
+        return f"{base}<sup>{parts[1]}</sup>"
+    # Handle subscripts: A_s -> A<sub>s</sub>
     if "_" in name:
         parts = name.split("_", 1)
         return f"{parts[0]}<sub>{parts[1]}</sub>"
     return name
 
 
+def _format_unit(unit: str) -> str:
+    """Format unit strings: mm^2 -> mm<sup>2</sup>, kN*m -> kN&middot;m."""
+    if not unit:
+        return unit
+    # Handle powers: mm^2 -> mm<sup>2</sup>
+    result = unit
+    if "^" in result:
+        parts = result.split("^", 1)
+        result = f"{parts[0]}<sup>{parts[1]}</sup>"
+    # Handle multiplication: kN*m -> kN&middot;m
+    result = result.replace("*", "&middot;")
+    return result
+
+
 # ============================================================
-# Embedded CSS (matches Hekatan Calc rendering)
+# Embedded CSS (matches Hekatan Calc real template)
 # ============================================================
 
 _CSS = """
-/* Hekatan Display CSS */
+/* Hekatan Calc CSS - Real template styles */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
@@ -351,22 +463,46 @@ body {
     line-height: 1.6;
     color: #333;
     background: #fff;
-    padding: 24px 32px;
-    max-width: 900px;
+    padding: 24px 40px;
+    max-width: 960px;
     margin: 0 auto;
 }
 
 .hekatan-doc { padding: 16px 0; }
 
-h1 { font-size: 1.8em; margin: 16px 0 8px; color: #1a1a1a; border-bottom: 2px solid #e0c060; padding-bottom: 4px; }
-h2 { font-size: 1.4em; margin: 14px 0 6px; color: #2a2a2a; }
-h3 { font-size: 1.15em; margin: 12px 0 4px; color: #333; }
+h1 {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 1.8em;
+    margin: 20px 0 10px;
+    color: #1a1a1a;
+    border-bottom: 2px solid #e0c060;
+    padding-bottom: 4px;
+}
+
+h2 {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 1.4em;
+    margin: 18px 0 8px;
+    color: #2a2a2a;
+}
+
+h3 {
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 1.15em;
+    margin: 14px 0 6px;
+    color: #333;
+}
 
 p { margin: 6px 0; }
 
-/* Equation line */
+/* ============================================
+   Equation line (.eq) - Georgia Pro serif font
+   ============================================ */
+.eq, table.matrix {
+    font-family: 'Georgia Pro', 'Century Schoolbook', 'Times New Roman', Times, serif;
+}
+
 .eq {
-    font-family: 'Cambria Math', 'Latin Modern Math', 'STIX Two Math', serif;
     font-size: 11pt;
     line-height: 2;
     margin: 2px 0;
@@ -377,8 +513,15 @@ p { margin: 6px 0; }
 }
 
 .eq var {
+    color: #06d;
+    font-size: 105%;
     font-style: italic;
-    color: #333;
+}
+
+.eq i {
+    color: #086;
+    font-style: normal;
+    font-size: 90%;
 }
 
 .eq b {
@@ -386,18 +529,41 @@ p { margin: 6px 0; }
     color: #1a1a1a;
 }
 
+.eq sub {
+    font-family: Calibri, Candara, Corbel, sans-serif;
+    font-size: 80%;
+    vertical-align: -18%;
+    margin-left: 1pt;
+}
+
+.eq sup {
+    display: inline-block;
+    margin-left: 1pt;
+    margin-top: -3pt;
+    font-size: 75%;
+}
+
+.eq small {
+    font-family: Calibri, Candara, Corbel, sans-serif;
+    font-size: 70%;
+}
+
 .unit {
-    font-size: 0.9em;
+    font-size: 0.85em;
     color: #666;
+    font-family: Calibri, Candara, Corbel, sans-serif;
 }
 
 .desc {
-    font-size: 0.9em;
+    font-size: 0.85em;
     color: #888;
     font-style: italic;
+    margin-left: 4px;
 }
 
-/* Matrix */
+/* ============================================
+   Matrix with bracket borders
+   ============================================ */
 .matrix {
     display: inline-table;
     border-collapse: collapse;
@@ -410,57 +576,133 @@ p { margin: 6px 0; }
 }
 
 .matrix .td {
+    white-space: nowrap;
+    padding: 0 2pt 0 2pt;
+    min-width: 10pt;
     display: table-cell;
     text-align: center;
-    padding: 2px 8px;
-    font-size: 10.5pt;
+    font-size: 10pt;
 }
 
-/* Bracket effect: first and last cells have borders */
-.matrix .tr .td:first-child {
-    border-left: 2px solid #333;
-    border-top: 2px solid #333;
-    border-bottom: 2px solid #333;
-    padding: 2px 4px;
-    width: 4px;
+/* Left and right bracket columns (empty cells) */
+.matrix .td:first-child,
+.matrix .td:last-child {
+    width: 0.75pt;
+    min-width: 0.75pt;
+    max-width: 0.75pt;
+    padding: 0 1pt 0 1pt;
 }
 
-.matrix .tr:first-child .td:first-child { border-bottom: none; }
-.matrix .tr:last-child .td:first-child { border-top: none; }
-.matrix .tr:not(:first-child):not(:last-child) .td:first-child { border-top: none; border-bottom: none; }
-
-.matrix .tr .td:last-child {
-    border-right: 2px solid #333;
-    border-top: 2px solid #333;
-    border-bottom: 2px solid #333;
-    padding: 2px 4px;
-    width: 4px;
+/* Left bracket border */
+.matrix .td:first-child {
+    border-left: solid 1pt black;
 }
 
-.matrix .tr:first-child .td:last-child { border-bottom: none; }
-.matrix .tr:last-child .td:last-child { border-top: none; }
-.matrix .tr:not(:first-child):not(:last-child) .td:last-child { border-top: none; border-bottom: none; }
+/* Right bracket border */
+.matrix .td:last-child {
+    border-right: solid 1pt black;
+}
 
-/* Fraction */
+/* Top bracket borders */
+.matrix .tr:first-child .td:first-child,
+.matrix .tr:first-child .td:last-child {
+    border-top: solid 1pt black;
+}
+
+/* Bottom bracket borders */
+.matrix .tr:last-child .td:first-child,
+.matrix .tr:last-child .td:last-child {
+    border-bottom: solid 1pt black;
+}
+
+/* ============================================
+   Fraction / Division (.dvc, .dvl)
+   ============================================ */
+.dvc, .dvr, .dvs {
+    display: inline-block;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
 .dvc {
+    padding-left: 2pt;
+    padding-right: 2pt;
+    text-align: center;
+    line-height: 110%;
+}
+
+.dvr {
+    text-align: center;
+    line-height: 110%;
+    margin-bottom: 4pt;
+}
+
+.dvs {
+    text-align: left;
+    line-height: 110%;
+}
+
+.dvl {
+    display: block;
+    border-bottom: solid 1pt black;
+    margin-top: 1pt;
+    margin-bottom: 1pt;
+    padding: 1px 6px;
+}
+
+.dvl:last-child {
+    border-bottom: none;
+}
+
+/* ============================================
+   Integral / Nary operators
+   ============================================ */
+.nary {
+    color: #C080F0;
+    font-size: 240%;
+    font-family: 'Georgia Pro Light', 'Georgia Pro', Georgia, serif;
+    font-weight: 200;
+    line-height: 80%;
+    display: block;
+    margin: -1pt 1pt 3pt 1pt;
+}
+
+.nary-wrap {
     display: inline-flex;
     flex-direction: column;
     align-items: center;
     vertical-align: middle;
-    margin: 0 4px;
+    margin: 0 2px;
 }
 
-.dvc .dvl {
-    display: block;
-    text-align: center;
-    padding: 1px 6px;
+.nary-sup {
+    font-size: 70%;
+    line-height: 1;
+    order: -1;
 }
 
-.dvc .dvl:first-child {
-    border-bottom: 1.5px solid #333;
+.nary-sub {
+    font-size: 70%;
+    line-height: 1;
 }
 
-/* Code output */
+.dot-sep {
+    margin: 0 1px;
+}
+
+/* ============================================
+   Equation number
+   ============================================ */
+.eq-num {
+    margin-left: auto;
+    padding-right: 8px;
+    font-size: 10pt;
+    color: #666;
+}
+
+/* ============================================
+   Code output
+   ============================================ */
 .lang-output-text {
     font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     font-size: 10.5pt;
@@ -469,5 +711,53 @@ p { margin: 6px 0; }
     color: #333;
     padding: 4px 0;
     margin: 4px 0;
+}
+
+/* ============================================
+   Block (nested expressions)
+   ============================================ */
+.block {
+    display: inline-block;
+    vertical-align: middle;
+    padding-left: 4pt;
+    margin-left: -1pt;
+    border-left: solid 1pt #80b0e8;
+    background: linear-gradient(to right, rgba(0, 192, 255, 0.06), rgba(0, 192, 255, 0.03));
+}
+
+/* ============================================
+   Bracket sizes (.b0-.b3, .c1-.c8)
+   ============================================ */
+.b0, .b1, .b2, .b3,
+.c1, .c2, .c3, .c4,
+.c5, .c6, .c7, .c8 {
+    display: inline-block;
+    vertical-align: middle;
+    font-weight: 100;
+    font-stretch: ultra-condensed;
+}
+
+.b0 { font-size: 120%; font-weight: 600; padding: 0 1pt; }
+.b1 { font-size: 240%; margin-top: -3pt; margin-left: -1pt; margin-right: -1pt; }
+.b2 { font-size: 370%; margin-top: -5pt; margin-left: -3pt; margin-right: -3pt; }
+.b3 { font-size: 520%; margin-top: -8pt; margin-left: -5pt; margin-right: -5pt; }
+.c1 { font-size: 240%; margin-top: -4pt; }
+.c2 { font-size: 360%; margin-top: -6pt; margin-left: -2.5pt; margin-right: -0.5pt; }
+.c3 { font-size: 480%; margin-top: -8pt; margin-left: -3pt; margin-right: -1pt; }
+.c4 { font-size: 600%; margin-top: -10pt; margin-left: -4pt; margin-right: -2pt; transform: scaleX(0.9); }
+
+/* Design check */
+.ok {
+    color: green;
+    background-color: #F0FFF0;
+    padding: 1px 4px;
+    font-size: 9pt;
+}
+
+.err {
+    color: red;
+    background-color: #FFF0F0;
+    padding: 1px 4px;
+    font-size: 9pt;
 }
 """
