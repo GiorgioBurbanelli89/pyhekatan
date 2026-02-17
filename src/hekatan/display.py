@@ -2,11 +2,11 @@
 Core display functions for Hekatan.
 
 Each function works in 3 modes:
-  - HEKATAN mode: emits HTML to stdout (captured by Hekatan Calc WPF/CLI)
+  - HEKATAN mode: emits @@DSL commands to stdout (C# parses → HTML)
   - STANDALONE mode: accumulates HTML, show() opens in browser
   - CONSOLE mode: ASCII formatted output
 
-v0.6.0 - Added: columns, check, image, note, code, hr, page_break, html_raw, formula
+v0.7.0 - DSL protocol: hekatan mode emits @@ commands, no HTML tags
 """
 
 import os
@@ -37,21 +37,14 @@ def _get_mode() -> str:
     return _MODE
 
 
-_CSS_EMITTED = False  # Track if CSS was already printed in hekatan mode
-
-
 def _emit(html: str):
-    """Emit an HTML element: in hekatan mode print to stdout, in standalone accumulate."""
-    global _CSS_EMITTED
-    mode = _get_mode()
-    if mode == "hekatan":
-        # First call: emit CSS style block so Hekatan Calc renders elements correctly
-        if not _CSS_EMITTED:
-            _CSS_EMITTED = True
-            print(f"<style>\n{_CSS}\n</style>")
-        print(html)
-    else:
-        _BUFFER.append(html)
+    """Emit an HTML element for standalone mode only."""
+    _BUFFER.append(html)
+
+
+def _dsl(cmd: str):
+    """Emit a DSL command to stdout for Hekatan Calc."""
+    print(cmd)
 
 
 def set_mode(mode: str):
@@ -65,6 +58,15 @@ def set_mode(mode: str):
 def clear():
     """Clear the accumulated buffer."""
     _BUFFER.clear()
+
+
+# ============================================================
+# Helper: escape pipe for DSL fields
+# ============================================================
+
+def _esc(val: str) -> str:
+    """Escape pipe characters in DSL field values."""
+    return str(val).replace("|", "\\|")
 
 
 # ============================================================
@@ -84,7 +86,13 @@ def matrix(data: List[List[Any]], name: Optional[str] = None):
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@matrix name|row1_c1,row1_c2;row2_c1,row2_c2
+        rows_str = ";".join(",".join(_esc(str(x)) for x in row) for row in data)
+        name_str = _esc(name) if name else ""
+        _dsl(f"@@matrix {name_str}|{rows_str}")
+
+    elif mode == "standalone":
         html = _matrix_to_html(data, name)
         _emit(html)
 
@@ -97,7 +105,6 @@ def _matrix_to_html(data: List[List[Any]], name: Optional[str] = None) -> str:
     rows_html = []
     for row in data:
         cells = "".join(f'<td class="td">{_format_subscript(str(x))}</td>' for x in row)
-        # Empty first/last cells create bracket effect
         rows_html.append(f'<tr class="tr"><td class="td"></td>{cells}<td class="td"></td></tr>')
 
     table = f'<table class="matrix">{"".join(rows_html)}</table>'
@@ -114,7 +121,6 @@ def _matrix_to_console(data: List[List[Any]], name: Optional[str] = None):
         print("[]")
         return
 
-    # Calculate column widths
     col_widths = []
     for j in range(len(data[0])):
         w = max(len(str(data[i][j])) for i in range(len(data)))
@@ -148,7 +154,11 @@ def eq(name: str, value: Any, unit: str = ""):
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@eq name|value|unit
+        _dsl(f"@@eq {_esc(name)}|{_esc(str(value))}|{_esc(unit)}")
+
+    elif mode == "standalone":
         display_name = _format_subscript(name)
         value_html = _format_expr(str(value))
         unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
@@ -179,7 +189,11 @@ def var(name: str, value: Any, unit: str = "", desc: str = ""):
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@var name|value|unit|desc
+        _dsl(f"@@var {_esc(name)}|{_esc(str(value))}|{_esc(unit)}|{_esc(desc)}")
+
+    elif mode == "standalone":
         display_name = _format_subscript(name)
         value_html = _format_expr(str(value))
         unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
@@ -211,7 +225,12 @@ def fraction(numerator: Any, denominator: Any, name: Optional[str] = None):
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@fraction name|numerator|denominator
+        name_str = _esc(name) if name else ""
+        _dsl(f"@@fraction {name_str}|{_esc(str(numerator))}|{_esc(str(denominator))}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         num_html = _format_subscript(str(numerator))
         den_html = _format_subscript(str(denominator))
@@ -235,7 +254,7 @@ def fraction(numerator: Any, denominator: Any, name: Optional[str] = None):
 
 
 # ============================================================
-# Integral display (new in 0.2.0)
+# Integral display
 # ============================================================
 
 def integral(integrand: str, variable: str = "x",
@@ -256,7 +275,14 @@ def integral(integrand: str, variable: str = "x",
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@integral name|integrand|variable|lower|upper
+        name_str = _esc(name) if name else ""
+        lower_str = _esc(lower) if lower else ""
+        upper_str = _esc(upper) if upper else ""
+        _dsl(f"@@integral {name_str}|{_esc(integrand)}|{_esc(variable)}|{lower_str}|{upper_str}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         integrand_html = _format_subscript(integrand)
         var_html = _format_subscript(variable)
@@ -290,7 +316,7 @@ def integral(integrand: str, variable: str = "x",
 
 
 # ============================================================
-# Derivative display (new in 0.3.0)
+# Derivative display
 # ============================================================
 
 def derivative(func: str, variable: str = "x", order: int = 1,
@@ -310,7 +336,12 @@ def derivative(func: str, variable: str = "x", order: int = 1,
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@derivative name|func|variable|order
+        name_str = _esc(name) if name else ""
+        _dsl(f"@@derivative {name_str}|{_esc(func)}|{_esc(variable)}|{order}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         func_html = _format_subscript(func)
         var_html = _format_subscript(variable)
@@ -340,7 +371,7 @@ def derivative(func: str, variable: str = "x", order: int = 1,
 
 
 # ============================================================
-# Partial derivative display (new in 0.3.0)
+# Partial derivative display
 # ============================================================
 
 def partial(func: str, variable: Union[str, List[str]] = "x",
@@ -370,7 +401,13 @@ def partial(func: str, variable: Union[str, List[str]] = "x",
         total_order = order
         vars_str = [variable]
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@partial name|func|var1,var2,...|order
+        name_str = _esc(name) if name else ""
+        vars_joined = ",".join(_esc(v) for v in vars_str)
+        _dsl(f"@@partial {name_str}|{_esc(func)}|{vars_joined}|{total_order}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         func_html = _format_subscript(func)
         pd = "\u2202"  # ∂
@@ -407,7 +444,7 @@ def partial(func: str, variable: Union[str, List[str]] = "x",
 
 
 # ============================================================
-# Summation display (new in 0.3.0)
+# Summation display
 # ============================================================
 
 def summation(expr: str, variable: str = "i",
@@ -429,11 +466,17 @@ def summation(expr: str, variable: str = "i",
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@summation name|expr|variable|lower|upper
+        name_str = _esc(name) if name else ""
+        lower_str = _esc(lower) if lower else ""
+        upper_str = _esc(upper) if upper else ""
+        _dsl(f"@@summation {name_str}|{_esc(expr)}|{_esc(variable)}|{lower_str}|{upper_str}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         expr_html = _format_subscript(expr)
 
-        # Format lower limit: if just a number, add "var ="
         lower_html = ""
         if lower:
             if "=" in lower:
@@ -469,7 +512,7 @@ def summation(expr: str, variable: str = "i",
 
 
 # ============================================================
-# Product display (new in 0.3.0)
+# Product display
 # ============================================================
 
 def product_op(expr: str, variable: str = "i",
@@ -490,7 +533,14 @@ def product_op(expr: str, variable: str = "i",
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@product name|expr|variable|lower|upper
+        name_str = _esc(name) if name else ""
+        lower_str = _esc(lower) if lower else ""
+        upper_str = _esc(upper) if upper else ""
+        _dsl(f"@@product {name_str}|{_esc(expr)}|{_esc(variable)}|{lower_str}|{upper_str}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         expr_html = _format_subscript(expr)
 
@@ -529,7 +579,7 @@ def product_op(expr: str, variable: str = "i",
 
 
 # ============================================================
-# Square root display (new in 0.3.0)
+# Square root display
 # ============================================================
 
 def sqrt(expr: str, name: Optional[str] = None, index: Optional[int] = None):
@@ -547,15 +597,19 @@ def sqrt(expr: str, name: Optional[str] = None, index: Optional[int] = None):
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@sqrt name|expr|index
+        name_str = _esc(name) if name else ""
+        index_str = str(index) if index else ""
+        _dsl(f"@@sqrt {name_str}|{_esc(expr)}|{index_str}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         expr_html = _format_expr(expr)
 
         if index:
-            # Nth root: &hairsp;<sup class="nth">n</sup>&hairsp;&hairsp;<span class="o0">...
             pad = f'&hairsp;<sup class="nth">{index}</sup>&hairsp;&hairsp;'
         else:
-            # Square root: &ensp;&hairsp;&hairsp;<span class="o0">...
             pad = '&ensp;&hairsp;&hairsp;'
 
         html = (
@@ -578,7 +632,7 @@ def sqrt(expr: str, name: Optional[str] = None, index: Optional[int] = None):
 
 
 # ============================================================
-# Double integral display (new in 0.3.0)
+# Double integral display
 # ============================================================
 
 def double_integral(integrand: str,
@@ -601,7 +655,12 @@ def double_integral(integrand: str,
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@double_integral name|integrand|var1|lower1|upper1|var2|lower2|upper2
+        name_str = _esc(name) if name else ""
+        _dsl(f"@@double_integral {name_str}|{_esc(integrand)}|{_esc(var1)}|{_esc(lower1 or '')}|{_esc(upper1 or '')}|{_esc(var2)}|{_esc(lower2 or '')}|{_esc(upper2 or '')}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         integrand_html = _format_subscript(integrand)
 
@@ -640,7 +699,7 @@ def double_integral(integrand: str,
 
 
 # ============================================================
-# Limit display (new in 0.3.0)
+# Limit display
 # ============================================================
 
 def limit_op(expr: str, variable: str = "x", to: str = "0",
@@ -661,7 +720,13 @@ def limit_op(expr: str, variable: str = "x", to: str = "0",
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@limit name|expr|variable|to|direction
+        name_str = _esc(name) if name else ""
+        dir_str = _esc(direction) if direction else ""
+        _dsl(f"@@limit {name_str}|{_esc(expr)}|{_esc(variable)}|{_esc(to)}|{dir_str}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         expr_html = _format_subscript(expr)
         var_html = _format_subscript(variable)
@@ -697,12 +762,10 @@ def eq_num(tag: str):
     mode = _get_mode()
 
     if mode == "hekatan":
-        html = f'<span class="eq-num">({tag})</span>'
-        _emit(html)
+        _dsl(f"@@eq_num {_esc(tag)}")
 
     elif mode == "standalone":
         html = f'<span class="eq-num">({tag})</span>'
-        # Modify last buffer entry to append the eq number
         if _BUFFER:
             last = _BUFFER[-1]
             if last.endswith("</div>"):
@@ -723,9 +786,12 @@ def eq_num(tag: str):
 def title(text_content: str, level: int = 1):
     """Display a heading."""
     mode = _get_mode()
-    tag = f"h{min(level, 6)}"
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        _dsl(f"@@title {level}|{_esc(text_content)}")
+
+    elif mode == "standalone":
+        tag = f"h{min(level, 6)}"
         _emit(f"<{tag}>{text_content}</{tag}>")
 
     else:
@@ -756,7 +822,13 @@ def table(data: List[List[Any]], header: bool = True):
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@table header|row1_c1,row1_c2;row2_c1,row2_c2
+        header_flag = "1" if header else "0"
+        rows_str = ";".join(",".join(_esc(str(c)) for c in row) for row in data)
+        _dsl(f"@@table {header_flag}|{rows_str}")
+
+    elif mode == "standalone":
         html_parts = ['<table class="hekatan-table">']
 
         for r_idx, row in enumerate(data):
@@ -790,7 +862,10 @@ def text(content: str):
     """Display plain text or markdown."""
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        _dsl(f"@@text {_esc(content)}")
+
+    elif mode == "standalone":
         _emit(f"<p>{_greek(content)}</p>")
 
     else:
@@ -798,7 +873,7 @@ def text(content: str):
 
 
 # ============================================================
-# Columns layout (new in 0.6.0)
+# Columns layout
 # ============================================================
 
 _COLUMNS_ACTIVE = False
@@ -824,7 +899,10 @@ def columns(n: int = 2):
     _COLUMNS_ACTIVE = True
     _COLUMNS_COUNT = n
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        _dsl(f"@@columns {n}")
+
+    elif mode == "standalone":
         width = 100 // n
         html = (
             f'<div class="columns-container" '
@@ -851,7 +929,10 @@ def column():
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        _dsl("@@column")
+
+    elif mode == "standalone":
         width = 100 // max(_COLUMNS_COUNT, 2)
         html = (
             f'</div>'
@@ -869,14 +950,17 @@ def end_columns():
     _COLUMNS_ACTIVE = False
     _COLUMNS_COUNT = 0
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        _dsl("@@end_columns")
+
+    elif mode == "standalone":
         _emit('</div></div>')
     else:
         print("--- End Columns ---")
 
 
 # ============================================================
-# Design check (new in 0.6.0)
+# Design check
 # ============================================================
 
 def check(name: str, value: Any, limit: Any, unit: str = "",
@@ -910,7 +994,11 @@ def check(name: str, value: Any, limit: Any, unit: str = "",
     passed = ops.get(condition, ops["<="])(float(value), float(limit))
     symbol = op_symbols.get(condition, "≤")
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@check name|value|limit|unit|condition|desc
+        _dsl(f"@@check {_esc(name)}|{_esc(str(value))}|{_esc(str(limit))}|{_esc(unit)}|{_esc(condition)}|{_esc(desc)}")
+
+    elif mode == "standalone":
         display_name = _format_subscript(name)
         unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
         status_class = "ok" if passed else "err"
@@ -937,7 +1025,7 @@ def check(name: str, value: Any, limit: Any, unit: str = "",
 
 
 # ============================================================
-# Image (new in 0.6.0)
+# Image
 # ============================================================
 
 def image(src: str, alt: str = "", width: Optional[str] = None, caption: Optional[str] = None):
@@ -955,7 +1043,13 @@ def image(src: str, alt: str = "", width: Optional[str] = None, caption: Optiona
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@image src|alt|width|caption
+        width_str = _esc(width) if width else ""
+        caption_str = _esc(caption) if caption else ""
+        _dsl(f"@@image {_esc(src)}|{_esc(alt)}|{width_str}|{caption_str}")
+
+    elif mode == "standalone":
         style = f' style="max-width:{width};"' if width else ' style="max-width:100%;"'
         img_html = f'<img src="{src}" alt="{alt}"{style}>'
         if caption:
@@ -975,7 +1069,7 @@ def image(src: str, alt: str = "", width: Optional[str] = None, caption: Optiona
 
 
 # ============================================================
-# Note / callout (new in 0.6.0)
+# Note / callout
 # ============================================================
 
 def note(content: str, kind: str = "info"):
@@ -999,7 +1093,11 @@ def note(content: str, kind: str = "info"):
     }
     bg, fg, border_color, icon = colors.get(kind, colors["info"])
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@note kind|content
+        _dsl(f"@@note {_esc(kind)}|{_esc(content)}")
+
+    elif mode == "standalone":
         html = (
             f'<div style="background:{bg};color:{fg};border-left:4px solid {border_color};'
             f'padding:8px 12px;margin:8px 0;border-radius:4px;font-size:10pt;">'
@@ -1013,7 +1111,7 @@ def note(content: str, kind: str = "info"):
 
 
 # ============================================================
-# Code block (new in 0.6.0)
+# Code block
 # ============================================================
 
 def code(content: str, lang: str = ""):
@@ -1029,7 +1127,13 @@ def code(content: str, lang: str = ""):
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@code lang|content (use base64 for multiline)
+        import base64
+        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        _dsl(f"@@code {_esc(lang)}|{encoded}")
+
+    elif mode == "standalone":
         escaped = content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         lang_class = f" code-{lang}" if lang else ""
         html = f'<pre class="code-block{lang_class}" style="background:#f8f8f8;border-left:3px solid #3776ab;border-radius:3px;padding:6px 8px;margin:6px 0;font-family:Consolas,monospace;font-size:9pt;line-height:1.4;white-space:pre;overflow-x:auto;">{escaped}</pre>'
@@ -1042,13 +1146,15 @@ def code(content: str, lang: str = ""):
 
 
 # ============================================================
-# Utility elements (new in 0.6.0)
+# Utility elements
 # ============================================================
 
 def hr():
     """Display a horizontal rule."""
     mode = _get_mode()
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        _dsl("@@hr")
+    elif mode == "standalone":
         _emit('<hr style="margin:12px 0;border:none;border-top:1px solid #ddd;">')
     else:
         print("-" * 60)
@@ -1057,7 +1163,9 @@ def hr():
 def page_break():
     """Insert a page break (for print/PDF output)."""
     mode = _get_mode()
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        _dsl("@@page_break")
+    elif mode == "standalone":
         _emit('<div style="page-break-before:always;"></div>')
     else:
         print("\n" + "=" * 60 + " [PAGE BREAK] " + "=" * 60 + "\n")
@@ -1074,14 +1182,18 @@ def html_raw(content: str):
         html_raw('<div style="color:red;font-size:24px;">Custom HTML</div>')
     """
     mode = _get_mode()
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        import base64
+        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        _dsl(f"@@html_raw {encoded}")
+    elif mode == "standalone":
         _emit(content)
     else:
         print(f"[HTML] {content[:80]}...")
 
 
 # ============================================================
-# Formula display (new in 0.6.0)
+# Formula display
 # ============================================================
 
 def formula(expression: str, name: Optional[str] = None, unit: str = ""):
@@ -1101,7 +1213,12 @@ def formula(expression: str, name: Optional[str] = None, unit: str = ""):
     """
     mode = _get_mode()
 
-    if mode in ("hekatan", "standalone"):
+    if mode == "hekatan":
+        # @@formula name|expression|unit
+        name_str = _esc(name) if name else ""
+        _dsl(f"@@formula {name_str}|{_esc(expression)}|{_esc(unit)}")
+
+    elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         expr_html = _format_expr(expression)
         unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
@@ -1121,13 +1238,13 @@ def formula(expression: str, name: Optional[str] = None, unit: str = ""):
 def show(filename: Optional[str] = None):
     """
     Generate HTML document and open in browser.
-    Only works in standalone mode. In hekatan mode, HTML is already printed to stdout.
+    Only works in standalone mode. In hekatan mode, DSL commands already sent to stdout.
 
     Args:
         filename: Optional output file path. If None, uses temp file.
     """
     if _get_mode() == "hekatan":
-        return  # HTML already sent to stdout via _emit()
+        return  # DSL already sent to stdout
 
     if not _BUFFER:
         print("hekatan: nothing to show")
@@ -1177,14 +1294,11 @@ def _format_subscript(name: str) -> str:
     """Convert A_s to A<sub>s</sub>, handle superscripts, and Greek letters."""
     if not name:
         return name
-    # First apply Greek letter conversion
     name = _greek(name)
-    # Handle superscripts: x^2 -> x<sup>2</sup>
     if "^" in name:
         parts = name.split("^", 1)
-        base = _format_subscript(parts[0])  # recurse for subscripts in base
+        base = _format_subscript(parts[0])
         return f"{base}<sup>{parts[1]}</sup>"
-    # Handle subscripts: A_s -> A<sub>s</sub>
     if "_" in name:
         parts = name.split("_", 1)
         return f"{parts[0]}<sub>{_greek(parts[1])}</sub>"
@@ -1192,26 +1306,18 @@ def _format_subscript(name: str) -> str:
 
 
 def _format_expr(expr: str) -> str:
-    """Format a math expression: split by operators, apply subscript/Greek to each token.
-
-    Unlike _format_subscript, this handles compound expressions like 'a^2 + b^2'
-    by splitting on operators (+, -, *, /) and formatting each part individually.
-    Plain numbers (like -10.5, 3.14) are returned as-is without splitting.
-    """
+    """Format a math expression: split by operators, apply subscript/Greek to each token."""
     if not expr:
         return expr
-    # If it's a plain number (possibly negative/decimal), return as-is
     stripped = expr.strip()
     import re as _re
     if _re.match(r'^-?\d+\.?\d*([eE][+-]?\d+)?$', stripped):
         return stripped
-    # Split by math operators while keeping the delimiters
     tokens = _re.split(r'(\s*[+\-*/=<>]\s*|\s*\*\*\s*)', expr)
     result = []
     for token in tokens:
         tok_stripped = token.strip()
         if tok_stripped in ('+', '-', '*', '/', '=', '<', '>', '**'):
-            # It's an operator, keep as-is with spacing
             result.append(f' {tok_stripped} ' if tok_stripped != '*' else ' &middot; ')
         elif not tok_stripped:
             result.append(token)
@@ -1249,8 +1355,6 @@ _GREEK_MAP = {
 }
 
 import re
-# Build regex: match longest names first to avoid partial matches (e.g. "epsilon" before "nu")
-# Use word boundaries OR underscore/start/end as delimiters
 _GREEK_NAMES = '|'.join(sorted(_GREEK_MAP.keys(), key=len, reverse=True))
 _GREEK_PATTERN = re.compile(
     r'(?:^|(?<=[\s_*()/,]))(' + _GREEK_NAMES + r')(?=[\s_^*()/,]|$)'
@@ -1261,33 +1365,25 @@ def _greek(text: str) -> str:
     """Replace Greek letter names with Unicode symbols."""
     if not text:
         return text
-    # Also handle standalone exact matches (single word)
     if text in _GREEK_MAP:
         return _GREEK_MAP[text]
     return _GREEK_PATTERN.sub(lambda m: _GREEK_MAP[m.group(1)], text)
 
 
 def _format_unit(unit: str) -> str:
-    """Format unit strings like Hekatan Calc.
-
-    - mm^2 -> mm<sup>2</sup>
-    - kN*m -> kN · m (thin space · thin space)
-    - kN/m^2 -> kN ∕ m<sup>2</sup> (thin space ∕ thin space)
-    """
+    """Format unit strings like Hekatan Calc."""
     if not unit:
         return unit
     result = unit
-    # Handle division: kN/m^2 -> split and format each part
     if "/" in result:
         parts = result.split("/", 1)
         left = _format_unit_part(parts[0])
         right = _format_unit_part(parts[1])
-        return f"{left}\u2009\u2215\u2009{right}"  # thin space ∕ thin space
-    # Handle multiplication: kN*m -> kN · m
+        return f"{left}\u2009\u2215\u2009{right}"
     if "*" in result:
         parts = result.split("*")
         formatted = [_format_unit_part(p) for p in parts]
-        return ("\u200A\u00B7\u200A").join(formatted)  # hair space · hair space
+        return ("\u200A\u00B7\u200A").join(formatted)
     return _format_unit_part(result)
 
 
@@ -1302,6 +1398,7 @@ def _format_unit_part(part: str) -> str:
 
 # ============================================================
 # Embedded CSS (matches Hekatan Calc real template)
+# Only used by standalone mode (show())
 # ============================================================
 
 _CSS = """

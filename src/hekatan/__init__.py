@@ -2,7 +2,7 @@
 Hekatan - Python display library for engineering calculations.
 
 Works in 3 modes:
-  1. Inside Hekatan Calc (WPF/CLI) - emits HTML to stdout for rendering
+  1. Inside Hekatan Calc (WPF/CLI) - emits @@DSL commands to stdout (C# parses to HTML)
   2. Standalone Python - show() generates HTML and opens in browser
   3. Console fallback - ASCII formatted output
 
@@ -16,7 +16,7 @@ Usage:
     show()  # Opens HTML in browser (standalone mode)
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from hekatan.display import (
     # Core math
