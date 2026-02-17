@@ -16,7 +16,7 @@ Usage:
     show()  # Opens HTML in browser (standalone mode)
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from hekatan.display import (
     matrix,
@@ -24,6 +24,13 @@ from hekatan.display import (
     var,
     fraction,
     integral,
+    derivative,
+    partial,
+    summation,
+    product_op,
+    sqrt,
+    double_integral,
+    limit_op,
     eq_num,
     title,
     text,

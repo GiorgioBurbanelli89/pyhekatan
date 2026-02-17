@@ -298,6 +298,434 @@ def integral(integrand: str, variable: str = "x",
 
 
 # ============================================================
+# Derivative display (new in 0.3.0)
+# ============================================================
+
+def derivative(func: str, variable: str = "x", order: int = 1,
+               name: Optional[str] = None):
+    """
+    Display an ordinary derivative: df/dx or d²f/dx².
+
+    Args:
+        func: Function name (e.g. "f", "y", "u")
+        variable: Differentiation variable (e.g. "x", "t")
+        order: Derivative order (1, 2, 3...)
+        name: Optional name for the result
+
+    Examples:
+        derivative("y", "x")           # dy/dx
+        derivative("f", "t", order=2)  # d²f/dt²
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        marker = f"@@HEKATAN:DERIV:{name or ''}={func}|{variable}|{order}"
+        print(marker)
+
+    elif mode == "standalone":
+        name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        func_html = _format_subscript(func)
+        var_html = _format_subscript(variable)
+
+        if order == 1:
+            num = f'd<var>{func_html}</var>'
+            den = f'd<var>{var_html}</var>'
+        else:
+            num = f'd<sup>{order}</sup><var>{func_html}</var>'
+            den = f'd<var>{var_html}</var><sup>{order}</sup>'
+
+        html = (
+            f'<div class="eq">{name_html}'
+            f'<span class="dvc">'
+            f'<span class="dvl">{num}</span>'
+            f'<span class="dvl">{den}</span>'
+            f'</span></div>'
+        )
+        _BUFFER.append(html)
+
+    else:  # console
+        prefix = f"{name} = " if name else ""
+        if order == 1:
+            print(f"{prefix}d{func}/d{variable}")
+        else:
+            print(f"{prefix}d^{order}{func}/d{variable}^{order}")
+
+
+# ============================================================
+# Partial derivative display (new in 0.3.0)
+# ============================================================
+
+def partial(func: str, variable: Union[str, List[str]] = "x",
+            order: int = 1, name: Optional[str] = None):
+    """
+    Display a partial derivative: ∂f/∂x or ∂²f/∂x².
+    Also supports mixed partials: ∂²f/∂x∂y.
+
+    Args:
+        func: Function name (e.g. "u", "phi")
+        variable: Variable(s) - str for single, list for mixed
+        order: Derivative order (auto-calculated for mixed)
+        name: Optional name for the result
+
+    Examples:
+        partial("u", "x")              # ∂u/∂x
+        partial("u", "t", order=2)     # ∂²u/∂t²
+        partial("u", ["x", "y"])       # ∂²u/∂x∂y
+    """
+    mode = _get_mode()
+
+    # Mixed partial
+    if isinstance(variable, list):
+        total_order = len(variable)
+        vars_str = variable
+    else:
+        total_order = order
+        vars_str = [variable]
+
+    if mode == "hekatan":
+        v_list = ",".join(vars_str)
+        marker = f"@@HEKATAN:PARTIAL:{name or ''}={func}|{v_list}|{total_order}"
+        print(marker)
+
+    elif mode == "standalone":
+        name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        func_html = _format_subscript(func)
+        pd = "\u2202"  # ∂
+
+        if total_order == 1:
+            num = f'{pd}<var>{func_html}</var>'
+            den = f'{pd}<var>{_format_subscript(vars_str[0])}</var>'
+        elif len(vars_str) == 1:
+            num = f'{pd}<sup>{total_order}</sup><var>{func_html}</var>'
+            den = f'{pd}<var>{_format_subscript(vars_str[0])}</var><sup>{total_order}</sup>'
+        else:
+            # Mixed: ∂²f / ∂x∂y
+            num = f'{pd}<sup>{total_order}</sup><var>{func_html}</var>'
+            den_parts = "".join(f'{pd}<var>{_format_subscript(v)}</var>' for v in vars_str)
+            den = den_parts
+
+        html = (
+            f'<div class="eq">{name_html}'
+            f'<span class="dvc">'
+            f'<span class="dvl">{num}</span>'
+            f'<span class="dvl">{den}</span>'
+            f'</span></div>'
+        )
+        _BUFFER.append(html)
+
+    else:  # console
+        prefix = f"{name} = " if name else ""
+        pd = "d" if total_order == 1 else f"d^{total_order}"
+        if len(vars_str) == 1:
+            den = f"d{vars_str[0]}" if total_order == 1 else f"d{vars_str[0]}^{total_order}"
+        else:
+            den = "".join(f"d{v}" for v in vars_str)
+        print(f"{prefix}{pd}{func}/{den}")
+
+
+# ============================================================
+# Summation display (new in 0.3.0)
+# ============================================================
+
+def summation(expr: str, variable: str = "i",
+              lower: Optional[str] = None, upper: Optional[str] = None,
+              name: Optional[str] = None):
+    """
+    Display a summation: Σ expr.
+
+    Args:
+        expr: Expression to sum (e.g. "a_i", "x_i^2")
+        variable: Index variable (e.g. "i", "k")
+        lower: Lower limit (e.g. "1", "i=1")
+        upper: Upper limit (e.g. "n", "N")
+        name: Optional result name
+
+    Examples:
+        summation("a_i", "i", "1", "n")
+        summation("k^2", "k", "0", "N", "S")
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        marker = f"@@HEKATAN:SUM:{name or ''}={expr}|{variable}"
+        if lower and upper:
+            marker += f"|{lower}|{upper}"
+        print(marker)
+
+    elif mode == "standalone":
+        name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        expr_html = _format_subscript(expr)
+
+        # Format lower limit: if just a number, add "var ="
+        lower_html = ""
+        if lower:
+            if "=" in lower:
+                lower_html = _format_subscript(lower)
+            else:
+                lower_html = f'{_format_subscript(variable)}={_format_subscript(lower)}'
+
+        if lower and upper:
+            sum_sym = (
+                f'<span class="nary-wrap">'
+                f'<span class="nary-sup">{_format_subscript(upper)}</span>'
+                f'<span class="nary">&sum;</span>'
+                f'<span class="nary-sub">{lower_html}</span>'
+                f'</span>'
+            )
+        else:
+            sum_sym = '<span class="nary">&sum;</span>'
+
+        html = (
+            f'<div class="eq">{name_html}'
+            f'{sum_sym}'
+            f'<var>{expr_html}</var></div>'
+        )
+        _BUFFER.append(html)
+
+    else:  # console
+        prefix = f"{name} = " if name else ""
+        if lower and upper:
+            low_str = f"{variable}={lower}" if "=" not in (lower or "") else lower
+            print(f"{prefix}sum({expr}, {low_str}..{upper})")
+        else:
+            print(f"{prefix}sum({expr})")
+
+
+# ============================================================
+# Product display (new in 0.3.0)
+# ============================================================
+
+def product_op(expr: str, variable: str = "i",
+               lower: Optional[str] = None, upper: Optional[str] = None,
+               name: Optional[str] = None):
+    """
+    Display a product: Π expr.
+
+    Args:
+        expr: Expression (e.g. "a_i")
+        variable: Index variable
+        lower: Lower limit
+        upper: Upper limit
+        name: Optional result name
+
+    Example:
+        product_op("a_i", "i", "1", "n", "P")
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        marker = f"@@HEKATAN:PROD:{name or ''}={expr}|{variable}"
+        if lower and upper:
+            marker += f"|{lower}|{upper}"
+        print(marker)
+
+    elif mode == "standalone":
+        name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        expr_html = _format_subscript(expr)
+
+        lower_html = ""
+        if lower:
+            if "=" in lower:
+                lower_html = _format_subscript(lower)
+            else:
+                lower_html = f'{_format_subscript(variable)}={_format_subscript(lower)}'
+
+        if lower and upper:
+            prod_sym = (
+                f'<span class="nary-wrap">'
+                f'<span class="nary-sup">{_format_subscript(upper)}</span>'
+                f'<span class="nary">&prod;</span>'
+                f'<span class="nary-sub">{lower_html}</span>'
+                f'</span>'
+            )
+        else:
+            prod_sym = '<span class="nary">&prod;</span>'
+
+        html = (
+            f'<div class="eq">{name_html}'
+            f'{prod_sym}'
+            f'<var>{expr_html}</var></div>'
+        )
+        _BUFFER.append(html)
+
+    else:  # console
+        prefix = f"{name} = " if name else ""
+        if lower and upper:
+            low_str = f"{variable}={lower}" if "=" not in (lower or "") else lower
+            print(f"{prefix}prod({expr}, {low_str}..{upper})")
+        else:
+            print(f"{prefix}prod({expr})")
+
+
+# ============================================================
+# Square root display (new in 0.3.0)
+# ============================================================
+
+def sqrt(expr: str, name: Optional[str] = None, index: Optional[int] = None):
+    """
+    Display a square root (or nth root).
+
+    Args:
+        expr: Expression under the radical
+        name: Optional result name
+        index: Root index (None for square root, 3 for cube root, etc.)
+
+    Examples:
+        sqrt("a^2 + b^2", "c")
+        sqrt("x", index=3)
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        idx = f"|{index}" if index else ""
+        marker = f"@@HEKATAN:SQRT:{name or ''}={expr}{idx}"
+        print(marker)
+
+    elif mode == "standalone":
+        name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        expr_html = _format_subscript(expr)
+        index_html = f'<sup class="sqrt-index">{index}</sup>' if index else ""
+
+        html = (
+            f'<div class="eq">{name_html}'
+            f'{index_html}'
+            f'<span class="sqrt-sym">&radic;</span>'
+            f'<span class="sqrt-body">{expr_html}</span>'
+            f'</div>'
+        )
+        _BUFFER.append(html)
+
+    else:  # console
+        prefix = f"{name} = " if name else ""
+        if index:
+            print(f"{prefix}{index}-root({expr})")
+        else:
+            print(f"{prefix}sqrt({expr})")
+
+
+# ============================================================
+# Double integral display (new in 0.3.0)
+# ============================================================
+
+def double_integral(integrand: str,
+                    var1: str = "x", lower1: Optional[str] = None, upper1: Optional[str] = None,
+                    var2: str = "y", lower2: Optional[str] = None, upper2: Optional[str] = None,
+                    name: Optional[str] = None):
+    """
+    Display a double integral.
+
+    Args:
+        integrand: Expression to integrate
+        var1: First variable
+        lower1, upper1: Limits for first integral
+        var2: Second variable
+        lower2, upper2: Limits for second integral
+        name: Optional result name
+
+    Example:
+        double_integral("f(x,y)", "x", "0", "a", "y", "0", "b", "I")
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        marker = (f"@@HEKATAN:DBLINT:{name or ''}={integrand}"
+                  f"|{var1}|{lower1 or ''}|{upper1 or ''}"
+                  f"|{var2}|{lower2 or ''}|{upper2 or ''}")
+        print(marker)
+
+    elif mode == "standalone":
+        name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        integrand_html = _format_subscript(integrand)
+
+        def _make_int_sym(lower, upper):
+            if lower and upper:
+                return (
+                    f'<span class="nary-wrap">'
+                    f'<span class="nary-sup">{_format_subscript(upper)}</span>'
+                    f'<span class="nary">&#8747;</span>'
+                    f'<span class="nary-sub">{_format_subscript(lower)}</span>'
+                    f'</span>'
+                )
+            return '<span class="nary">&#8747;</span>'
+
+        int1 = _make_int_sym(lower2, upper2)
+        int2 = _make_int_sym(lower1, upper1)
+        var1_html = _format_subscript(var1)
+        var2_html = _format_subscript(var2)
+
+        html = (
+            f'<div class="eq">{name_html}'
+            f'{int1}{int2}'
+            f'<var>{integrand_html}</var>'
+            f'<span class="dot-sep">&middot;</span>'
+            f'd<var>{var1_html}</var>'
+            f'<span class="dot-sep">&middot;</span>'
+            f'd<var>{var2_html}</var></div>'
+        )
+        _BUFFER.append(html)
+
+    else:  # console
+        prefix = f"{name} = " if name else ""
+        lims1 = f", {lower1}..{upper1}" if lower1 and upper1 else ""
+        lims2 = f", {lower2}..{upper2}" if lower2 and upper2 else ""
+        print(f"{prefix}dblint({integrand}, d{var1}{lims1}, d{var2}{lims2})")
+
+
+# ============================================================
+# Limit display (new in 0.3.0)
+# ============================================================
+
+def limit_op(expr: str, variable: str = "x", to: str = "0",
+             direction: Optional[str] = None, name: Optional[str] = None):
+    """
+    Display a limit expression.
+
+    Args:
+        expr: Expression (e.g. "sin(x)/x")
+        variable: Variable approaching the limit
+        to: Value being approached
+        direction: "+" for right, "-" for left, None for both
+        name: Optional result name
+
+    Examples:
+        limit_op("sin(x)/x", "x", "0")
+        limit_op("1/x", "x", "0", direction="+")
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        d = direction or ""
+        marker = f"@@HEKATAN:LIMIT:{name or ''}={expr}|{variable}|{to}|{d}"
+        print(marker)
+
+    elif mode == "standalone":
+        name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        expr_html = _format_subscript(expr)
+        var_html = _format_subscript(variable)
+        to_html = _format_subscript(to)
+        dir_html = f'<sup>{direction}</sup>' if direction else ""
+
+        lim_sym = (
+            f'<span class="nary-wrap">'
+            f'<span class="nary" style="font-size:120%;color:#333;">lim</span>'
+            f'<span class="nary-sub"><var>{var_html}</var>&rarr;{to_html}{dir_html}</span>'
+            f'</span>'
+        )
+
+        html = (
+            f'<div class="eq">{name_html}'
+            f'{lim_sym}'
+            f'<var>{expr_html}</var></div>'
+        )
+        _BUFFER.append(html)
+
+    else:  # console
+        prefix = f"{name} = " if name else ""
+        d = f"{direction}" if direction else ""
+        print(f"{prefix}lim({variable}->{to}{d}) {expr}")
+
+
+# ============================================================
 # Equation number (reference tag)
 # ============================================================
 
@@ -810,5 +1238,27 @@ p { margin: 6px 0; }
     background-color: #FFF0F0;
     padding: 1px 4px;
     font-size: 9pt;
+}
+
+/* ============================================
+   Square root
+   ============================================ */
+.sqrt-sym {
+    font-size: 130%;
+    vertical-align: middle;
+    color: #333;
+}
+
+.sqrt-body {
+    display: inline-block;
+    border-top: solid 1pt black;
+    padding: 0 4px 0 2px;
+    vertical-align: middle;
+}
+
+.sqrt-index {
+    font-size: 65%;
+    margin-right: -4px;
+    vertical-align: super;
 }
 """
