@@ -141,10 +141,10 @@ def eq(name: str, value: Any, unit: str = ""):
         print(marker)
 
     elif mode == "standalone":
-        unit_html = f' <span class="unit">{_format_unit(unit)}</span>' if unit else ""
         display_name = _format_subscript(name)
         value_html = _format_expr(str(value))
-        html = f'<div class="eq"><var>{display_name}</var> = <b>{value_html}</b>{unit_html}</div>'
+        unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
+        html = f'<div class="eq"><var>{display_name}</var> = <span class="val">{value_html}{unit_html}</span></div>'
         _BUFFER.append(html)
 
     else:  # console
@@ -182,9 +182,9 @@ def var(name: str, value: Any, unit: str = "", desc: str = ""):
     elif mode == "standalone":
         display_name = _format_subscript(name)
         value_html = _format_expr(str(value))
-        unit_html = f' <span class="unit">{_format_unit(unit)}</span>' if unit else ""
+        unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
         desc_html = f' <span class="desc">{desc}</span>' if desc else ""
-        html = f'<div class="eq"><var>{display_name}</var> = <b>{value_html}</b>{unit_html}{desc_html}</div>'
+        html = f'<div class="eq"><var>{display_name}</var> = <span class="val">{value_html}{unit_html}</span>{desc_html}</div>'
         _BUFFER.append(html)
 
     else:  # console
@@ -933,22 +933,27 @@ def _format_expr(expr: str) -> str:
 
     Unlike _format_subscript, this handles compound expressions like 'a^2 + b^2'
     by splitting on operators (+, -, *, /) and formatting each part individually.
+    Plain numbers (like -10.5, 3.14) are returned as-is without splitting.
     """
     if not expr:
         return expr
-    # Split by math operators while keeping the delimiters
+    # If it's a plain number (possibly negative/decimal), return as-is
+    stripped = expr.strip()
     import re as _re
+    if _re.match(r'^-?\d+\.?\d*([eE][+-]?\d+)?$', stripped):
+        return stripped
+    # Split by math operators while keeping the delimiters
     tokens = _re.split(r'(\s*[+\-*/=<>]\s*|\s*\*\*\s*)', expr)
     result = []
     for token in tokens:
-        stripped = token.strip()
-        if stripped in ('+', '-', '*', '/', '=', '<', '>', '**'):
+        tok_stripped = token.strip()
+        if tok_stripped in ('+', '-', '*', '/', '=', '<', '>', '**'):
             # It's an operator, keep as-is with spacing
-            result.append(f' {stripped} ' if stripped != '*' else ' &middot; ')
-        elif not stripped:
+            result.append(f' {tok_stripped} ' if tok_stripped != '*' else ' &middot; ')
+        elif not tok_stripped:
             result.append(token)
         else:
-            result.append(_format_subscript(stripped))
+            result.append(_format_subscript(tok_stripped))
     return ''.join(result)
 
 
@@ -1000,19 +1005,36 @@ def _greek(text: str) -> str:
 
 
 def _format_unit(unit: str) -> str:
-    """Format unit strings: mm^2 -> mm<sup>2</sup>, kN*m -> kN&middot;m."""
+    """Format unit strings like Hekatan Calc.
+
+    - mm^2 -> mm<sup>2</sup>
+    - kN*m -> kN · m (thin space · thin space)
+    - kN/m^2 -> kN ∕ m<sup>2</sup> (thin space ∕ thin space)
+    """
     if not unit:
         return unit
-    # Handle powers: mm^2 -> mm<sup>2</sup>
     result = unit
-    if "^" in result:
-        parts = result.split("^", 1)
-        result = f"{parts[0]}<sup>{parts[1]}</sup>"
-    # Handle multiplication: kN*m -> kN&middot;m
-    result = result.replace("*", "&middot;")
-    # Also convert Greek letters in units
-    result = _greek(result)
-    return result
+    # Handle division: kN/m^2 -> split and format each part
+    if "/" in result:
+        parts = result.split("/", 1)
+        left = _format_unit_part(parts[0])
+        right = _format_unit_part(parts[1])
+        return f"{left}\u2009\u2215\u2009{right}"  # thin space ∕ thin space
+    # Handle multiplication: kN*m -> kN · m
+    if "*" in result:
+        parts = result.split("*")
+        formatted = [_format_unit_part(p) for p in parts]
+        return ("\u200A\u00B7\u200A").join(formatted)  # hair space · hair space
+    return _format_unit_part(result)
+
+
+def _format_unit_part(part: str) -> str:
+    """Format a single unit part: mm^2 -> mm<sup>2</sup>."""
+    part = part.strip()
+    if "^" in part:
+        base, exp = part.split("^", 1)
+        return f"{_greek(base)}<sup>{exp}</sup>"
+    return _greek(part)
 
 
 # ============================================================
@@ -1085,9 +1107,10 @@ p { margin: 6px 0; }
 }
 
 .eq i {
-    color: #086;
+    color: #059669;
     font-style: normal;
-    font-size: 90%;
+    font-size: 95%;
+    font-weight: 500;
 }
 
 .eq b {
@@ -1118,6 +1141,11 @@ p { margin: 6px 0; }
     font-size: 0.85em;
     color: #666;
     font-family: Calibri, Candara, Corbel, sans-serif;
+}
+
+.val {
+    font-weight: 600;
+    color: #1a1a1a;
 }
 
 .desc {
