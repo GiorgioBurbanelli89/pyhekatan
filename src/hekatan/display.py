@@ -878,54 +878,65 @@ def text(content: str):
 
 _COLUMNS_ACTIVE = False
 _COLUMNS_COUNT = 0
+_COLUMNS_PROPS = []
+_COLUMNS_CSS = False
 
 
-def columns(n: int = 2):
-    """
-    Start a multi-column layout.
+def columns(n: int = 2, proportions: str = "", css_columns: bool = False):
+    """Start a multi-column layout.
 
     Args:
-        n: Number of columns (2-4 recommended)
+        n: Number of columns (2-4 recommended).
+        proportions: Column width ratios, e.g. "32:68" or "1:2:1".
+            If empty, columns are equal width.
+        css_columns: If True, use CSS column-count (auto-flowing text).
+            If False (default), use flex layout (explicit column() breaks).
 
-    Example:
-        columns(2)
-        eq("F", 25.5, "kN")
-        column()
-        eq("M", 100, "kN*m")
-        end_columns()
+    Examples:
+        columns(2)                        # Equal 2-column flex
+        columns(2, "32:68")               # 32% / 68% flex
+        columns(2, css_columns=True)      # CSS multi-column flow
     """
-    global _COLUMNS_ACTIVE, _COLUMNS_COUNT
+    global _COLUMNS_ACTIVE, _COLUMNS_COUNT, _COLUMNS_PROPS, _COLUMNS_CSS
     mode = _get_mode()
     _COLUMNS_ACTIVE = True
     _COLUMNS_COUNT = n
+    _COLUMNS_CSS = css_columns
+
+    # Parse proportions
+    if proportions:
+        parts = [float(p) for p in proportions.split(":")]
+        total = sum(parts)
+        _COLUMNS_PROPS = [p / total * 100 for p in parts]
+    else:
+        _COLUMNS_PROPS = [100 / n] * n
 
     if mode == "hekatan":
-        _dsl(f"@@columns {n}")
+        prop_str = f" {proportions}" if proportions else ""
+        _dsl(f"@@columns {n}{prop_str}")
 
     elif mode == "standalone":
-        width = 100 // n
-        html = (
-            f'<div class="columns-container" '
-            f'style="display:flex;gap:1em;flex-wrap:wrap;">'
-            f'<div class="column" style="flex:1;min-width:{width - 5}%;max-width:{width + 5}%;">'
-        )
+        if css_columns:
+            gap = _PAPER_CONFIG.get("columngap", "8mm") if _PAPER_CONFIG else "1em"
+            html = f'<div style="column-count:{n};column-gap:{gap};orphans:3;widows:3;">'
+        else:
+            gap = _PAPER_CONFIG.get("columngap", "1em") if _PAPER_CONFIG else "1em"
+            w = _COLUMNS_PROPS[0]
+            html = (
+                f'<div class="columns-container" '
+                f'style="display:flex;gap:{gap};flex-wrap:wrap;">'
+                f'<div class="column" style="flex:0 0 {w:.1f}%;max-width:{w:.1f}%;">'
+            )
         _emit(html)
     else:
         print(f"--- Columns ({n}) ---")
 
 
 def column():
-    """
-    Start the next column in a multi-column layout.
+    """Start the next column in a multi-column layout.
 
-    Example:
-        columns(3)
-        text("Col 1 content")
-        column()
-        text("Col 2 content")
-        column()
-        text("Col 3 content")
-        end_columns()
+    In CSS column mode, this inserts a column break.
+    In flex mode, this closes the current column and opens the next.
     """
     mode = _get_mode()
 
@@ -933,22 +944,35 @@ def column():
         _dsl("@@column")
 
     elif mode == "standalone":
-        width = 100 // max(_COLUMNS_COUNT, 2)
-        html = (
-            f'</div>'
-            f'<div class="column" style="flex:1;min-width:{width - 5}%;max-width:{width + 5}%;">'
-        )
-        _emit(html)
+        if _COLUMNS_CSS:
+            _emit('<div style="break-before:column;"></div>')
+        else:
+            # Determine which column we're opening (track via buffer)
+            # Simple approach: count existing column divs
+            col_idx = 1
+            for item in _BUFFER:
+                if 'class="column"' in item and '</div>' not in item:
+                    col_idx += 1
+            if col_idx >= len(_COLUMNS_PROPS):
+                col_idx = len(_COLUMNS_PROPS) - 1
+            w = _COLUMNS_PROPS[col_idx] if col_idx < len(_COLUMNS_PROPS) else _COLUMNS_PROPS[-1]
+            html = (
+                f'</div>'
+                f'<div class="column" style="flex:0 0 {w:.1f}%;max-width:{w:.1f}%;">'
+            )
+            _emit(html)
     else:
         print("---")
 
 
 def end_columns():
     """End the multi-column layout."""
-    global _COLUMNS_ACTIVE, _COLUMNS_COUNT
+    global _COLUMNS_ACTIVE, _COLUMNS_COUNT, _COLUMNS_PROPS, _COLUMNS_CSS
     mode = _get_mode()
     _COLUMNS_ACTIVE = False
     _COLUMNS_COUNT = 0
+    _COLUMNS_PROPS = []
+    _COLUMNS_CSS = False
 
     if mode == "hekatan":
         _dsl("@@end_columns")
@@ -1160,14 +1184,51 @@ def hr():
         print("-" * 60)
 
 
-def page_break():
-    """Insert a page break (for print/PDF output)."""
+def page_break(left: str = "", right: str = "", linecolor: str = "",
+               textcolor: str = ""):
+    """Insert a page break with optional running header.
+
+    When called with text arguments, renders a header/footer line at the
+    bottom of the page before the break (useful for running headers in
+    multi-page documents).
+
+    Args:
+        left: Left-aligned running header text.
+        right: Right-aligned running header text (e.g. page number).
+        linecolor: Color of the separator line.
+        textcolor: Color of the header text.
+    """
     mode = _get_mode()
     if mode == "hekatan":
-        _dsl("@@page_break")
+        if left or right:
+            parts = []
+            if left:
+                parts.append(f"left={_esc(left)}")
+            if right:
+                parts.append(f"right={_esc(right)}")
+            if linecolor:
+                parts.append(f"linecolor={_esc(linecolor)}")
+            if textcolor:
+                parts.append(f"textcolor={_esc(textcolor)}")
+            _dsl(f"@@pagebreak {';'.join(parts)}")
+        else:
+            _dsl("@@page_break")
     elif mode == "standalone":
+        if left or right:
+            lc = linecolor or "#999"
+            tc = textcolor or "#666"
+            _emit(
+                f'<div style="display:flex;justify-content:space-between;'
+                f'font-size:8.5pt;color:{tc};border-top:1px solid {lc};'
+                f'padding:6px 0;margin-top:20px;">'
+                f'<span>{_greek(left)}</span>'
+                f'<span>{_greek(right)}</span>'
+                f'</div>'
+            )
         _emit('<div style="page-break-before:always;"></div>')
     else:
+        if left or right:
+            print(f"--- {left}  |  {right} ---")
         print("\n" + "=" * 60 + " [PAGE BREAK] " + "=" * 60 + "\n")
 
 
@@ -1266,8 +1327,42 @@ def show(filename: Optional[str] = None):
 
 
 def _generate_html() -> str:
-    """Generate complete HTML document with Hekatan CSS."""
+    """Generate complete HTML document with Hekatan CSS.
+
+    If paper() was called, applies paper-specific overrides (font, size, margin, accent).
+    """
     body = "\n".join(_BUFFER)
+
+    # Paper-specific CSS overrides
+    paper_css = ""
+    if _PAPER_CONFIG:
+        p = _PAPER_CONFIG
+        font = p.get("font", '"Georgia", "Times New Roman", Times, serif')
+        fontsize = p.get("fontsize", "10pt")
+        color = p.get("color", "#333")
+        accent = p.get("accent", "#e0c060")
+        bg = p.get("background", "#fff")
+        lh = p.get("lineheight", 1.45)
+        margin = p.get("margin", "20mm 18mm 25mm 18mm")
+        size = p.get("size", "A4")
+
+        paper_css = f"""
+/* Paper configuration overrides */
+@page {{
+    size: {size};
+    margin: {margin};
+}}
+body {{
+    font-family: {font};
+    font-size: {fontsize};
+    color: {color};
+    background: {bg};
+    line-height: {lh};
+}}
+h1 {{ border-bottom-color: {accent}; }}
+h2 {{ color: {color}; }}
+"""
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1276,6 +1371,7 @@ def _generate_html() -> str:
 <title>Hekatan Output</title>
 <style>
 {_CSS}
+{paper_css}
 </style>
 </head>
 <body>
@@ -1291,17 +1387,36 @@ def _generate_html() -> str:
 # ============================================================
 
 def _format_subscript(name: str) -> str:
-    """Convert A_s to A<sub>s</sub>, handle superscripts, and Greek letters."""
+    """Convert A_s to A<sub>s</sub>, handle superscripts, and Greek letters.
+
+    Supports both simple notation (A_s, x^2) and braced notation (A_{steel}, x^{2n}).
+
+    Rules:
+      - Braced: _{...} and ^{...} consume everything inside braces
+      - Simple superscript ^N: only consume DIGITS (so ∂^2M → ∂²M, not ∂^{2M})
+      - Simple subscript _x: consume ONE letter or Greek char, or digits
+      - All occurrences are processed (global replacement, not just the first)
+    """
     if not name:
         return name
     name = _greek(name)
-    if "^" in name:
-        parts = name.split("^", 1)
-        base = _format_subscript(parts[0])
-        return f"{base}<sup>{parts[1]}</sup>"
-    if "_" in name:
-        parts = name.split("_", 1)
-        return f"{parts[0]}<sub>{_greek(parts[1])}</sub>"
+    # 1) Braced subscripts: _{...}  (global)
+    name = re.sub(r'_\{([^}]+)\}', r'<sub>\1</sub>', name)
+    # 2) Braced superscripts: ^{...}  (global)
+    name = re.sub(r'\^\{([^}]+)\}', r'<sup>\1</sup>', name)
+    # 3) Simple superscript: ^2, ^42 — only consume DIGITS (global)
+    #    This prevents ∂^2M from becoming ∂<sup>2M</sup>
+    name = re.sub(r'\^(\d+)', r'<sup>\1</sup>', name)
+    # 4) Simple subscript: N_x, σ_x, τ_{xy} — consume one letter/Greek char or digits (global)
+    #    Match: letter/Greek NOT preceded by < (to avoid matching inside HTML tags)
+    _GREEK_CHARS = 'αβγδεζηθικλμνξπρστυφχψωΓΔΘΛΣΦΨΩ∇∂∞'
+    name = re.sub(
+        r'_([a-zA-Z' + _GREEK_CHARS + r'])',
+        lambda m: f'<sub>{m.group(1)}</sub>',
+        name
+    )
+    # Also handle _N where N is digits: M_1, σ_12
+    name = re.sub(r'_(\d+)', r'<sub>\1</sub>', name)
     return name
 
 
@@ -1352,17 +1467,26 @@ _GREEK_MAP = {
     # Common variants
     "varepsilon": "\u03B5", "varphi": "\u03C6",
     "infty": "\u221E",     "infinity": "\u221E",
+    # Math symbols
+    "nabla": "\u2207",     "partial": "\u2202",
 }
 
 import re
 _GREEK_NAMES = '|'.join(sorted(_GREEK_MAP.keys(), key=len, reverse=True))
+# Word-boundary that works with Spanish characters — prevents "mu" matching inside "comunidad"
 _GREEK_PATTERN = re.compile(
-    r'(?:^|(?<=[\s_*()/,]))(' + _GREEK_NAMES + r')(?=[\s_^*()/,]|$)'
+    r'(?<![a-zA-Z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc\u00c1\u00c9\u00cd\u00d3\u00da\u00d1\u00dc])'
+    r'(' + _GREEK_NAMES + r')'
+    r'(?![a-zA-Z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc\u00c1\u00c9\u00cd\u00d3\u00da\u00d1\u00dc])'
 )
 
 
 def _greek(text: str) -> str:
-    """Replace Greek letter names with Unicode symbols."""
+    """Replace Greek letter names with Unicode symbols.
+
+    Uses word-boundary regex that respects Spanish characters,
+    so 'mu' won't match inside 'comunidad', 'nu' won't match inside 'continuidad'.
+    """
     if not text:
         return text
     if text in _GREEK_MAP:
@@ -1394,6 +1518,547 @@ def _format_unit_part(part: str) -> str:
         base, exp = part.split("^", 1)
         return f"{_greek(base)}<sup>{exp}</sup>"
     return _greek(part)
+
+
+# ============================================================
+# Recursive fraction parser (for eq_block)
+# ============================================================
+
+def _parse_fraction(expr: str) -> str:
+    """Recursively parse (numerator)/(denominator) into HTML fraction divs.
+
+    Handles nested parentheses properly:
+        (a + b)/(c + d)  →  fraction bar
+        ((a)/(b))/(c)    →  nested fractions
+
+    Returns HTML string with <span class="dvc">/<span class="dvl"> for each fraction.
+    """
+    result = []
+    i = 0
+    while i < len(expr):
+        if expr[i] == '(':
+            # Find matching closing paren
+            depth = 1
+            j = i + 1
+            while j < len(expr) and depth > 0:
+                if expr[j] == '(':
+                    depth += 1
+                elif expr[j] == ')':
+                    depth -= 1
+                j += 1
+            num_content = expr[i + 1:j - 1]
+
+            # Check if followed by /(
+            if j < len(expr) and expr[j] == '/' and j + 1 < len(expr) and expr[j + 1] == '(':
+                depth = 1
+                k = j + 2
+                while k < len(expr) and depth > 0:
+                    if expr[k] == '(':
+                        depth += 1
+                    elif expr[k] == ')':
+                        depth -= 1
+                    k += 1
+                den_content = expr[j + 2:k - 1]
+
+                num_html = _parse_fraction(num_content)
+                den_html = _parse_fraction(den_content)
+
+                result.append(
+                    f'<span class="dvc">'
+                    f'<span class="dvl">{_format_subscript(num_html)}</span>'
+                    f'<span class="dvl">{_format_subscript(den_html)}</span>'
+                    f'</span>'
+                )
+                i = k
+            else:
+                inner = _parse_fraction(num_content)
+                result.append(f'({inner})')
+                i = j
+        else:
+            result.append(expr[i])
+            i += 1
+    return ''.join(result)
+
+
+def _parse_calc_eq(expr: str) -> str:
+    """Parse Hekatan Calc-style equation syntax into HTML.
+
+    Handles:
+      - Fractions: (a)/(b) with recursive nesting
+      - Integrals: ∫_{lower}^{upper}
+      - Summation: Σ_{lower}^{upper}
+      - Nabla: ∇^2, ∇^4
+      - Equation numbers: (N) at end of line
+      - Subscripts/superscripts: _{...}, ^{...}
+      - Greek letters: alpha, beta, etc.
+      - Multiplication dot: ·
+    """
+    expr = _greek(expr)
+
+    # Equation number: (N), (1.2), (1.5a) at the end
+    eq_num_html = ""
+    num_match = re.search(r'\s{2,}\((\d+[\.\d]*[a-z]?)\)\s*$', expr)
+    if num_match:
+        eq_num_html = f'<span class="eq-num">({num_match.group(1)})</span>'
+        expr = expr[:num_match.start()]
+
+    # Fractions with recursive parser
+    expr = _parse_fraction(expr)
+
+    # Integrals: ∫_{lower}^{upper}
+    def _replace_integral(m):
+        lower = m.group(1) if m.group(1) else ""
+        upper = m.group(2) if m.group(2) else ""
+        lower_html = _format_subscript(lower) if lower else ""
+        upper_html = _format_subscript(upper) if upper else ""
+        if lower_html or upper_html:
+            return (f'<span class="nary-wrap">'
+                    f'<span class="nary-sup">{upper_html}</span>'
+                    f'<span class="nary">&#8747;</span>'
+                    f'<span class="nary-sub">{lower_html}</span>'
+                    f'</span>')
+        return '<span class="nary">&#8747;</span>'
+
+    expr = re.sub(r'\u222B_\{([^}]*)\}\^\{([^}]*)\}', _replace_integral, expr)
+    expr = re.sub(
+        r'\u222B_\{([^}]*)\}',
+        lambda m: (f'<span class="nary-wrap">'
+                   f'<span class="nary-sup"></span>'
+                   f'<span class="nary">&#8747;</span>'
+                   f'<span class="nary-sub">{_format_subscript(m.group(1))}</span>'
+                   f'</span>'),
+        expr
+    )
+    expr = re.sub(r'\u222B', lambda m: '<span class="nary">&#8747;</span>', expr)
+
+    # Summation: Σ_{lower}^{upper}
+    def _replace_sum(m):
+        lower = m.group(1) if m.group(1) else ""
+        upper = m.group(2) if m.group(2) else ""
+        return (f'<span class="nary-wrap">'
+                f'<span class="nary-sup">{_format_subscript(upper)}</span>'
+                f'<span class="nary" style="font-size:180%;">\u03A3</span>'
+                f'<span class="nary-sub">{_format_subscript(lower)}</span>'
+                f'</span>')
+
+    expr = re.sub(r'\u03A3_\{([^}]*)\}\^\{([^}]*)\}', _replace_sum, expr)
+
+    # ∇^N — use lambda to avoid bad escape in replacement string
+    expr = re.sub(r'\u2207\^(\d+)', lambda m: f'\u2207<sup>{m.group(1)}</sup>', expr)
+
+    # Subscripts/superscripts
+    expr = _format_subscript(expr)
+
+    # Multiplication dot spacing
+    expr = expr.replace('\u00B7', ' \u00B7 ')
+
+    return f'<div class="eq" style="justify-content:center;">{expr}{eq_num_html}</div>'
+
+
+# ============================================================
+# eq_block — rich equation display (Hekatan Calc style)
+# ============================================================
+
+def eq_block(*equations: str):
+    """Display one or more equations using Hekatan Calc expression syntax.
+
+    Each equation string is parsed for:
+      - Fractions: (num)/(den) with recursive nesting
+      - Integrals: ∫_{lower}^{upper}
+      - Summation: Σ_{lower}^{upper}
+      - Equation numbers: (N) at end → right-aligned
+      - Greek letters, subscripts, superscripts
+
+    Args:
+        *equations: Equation strings in Hekatan Calc notation.
+
+    Examples:
+        eq_block("k = (E · A)/(L)  (1)")
+        eq_block(
+            "sigma = (N)/(A) + (M · y)/(I_z)  (2)",
+            "epsilon = (partial u)/(partial x)  (3)",
+        )
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        for equation in equations:
+            _dsl(f"@@eq_block {_esc(equation)}")
+
+    elif mode == "standalone":
+        for equation in equations:
+            html = _parse_calc_eq(equation)
+            _emit(html)
+
+    else:  # console
+        for equation in equations:
+            print(f"  {equation}")
+
+
+# ============================================================
+# Markdown text block
+# ============================================================
+
+def markdown(content: str):
+    """Display markdown-formatted text.
+
+    Supports: headings (#, ##, ###), bold (**text**), italic (*text*),
+    unordered lists (- item), and paragraphs.
+    Greek letter names are auto-replaced.
+
+    Args:
+        content: Markdown text string.
+
+    Example:
+        markdown('''
+        ## Introduction
+        The **finite element method** is based on:
+        - Weak formulation
+        - Shape functions
+        - Assembly procedure
+        ''')
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        import base64
+        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        _dsl(f"@@markdown {encoded}")
+
+    elif mode == "standalone":
+        lines = content.strip().split('\n')
+        in_list = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                if in_list:
+                    _emit("</ul>")
+                    in_list = False
+                _emit("<p>&nbsp;</p>")
+                continue
+            if stripped.startswith('### '):
+                if in_list:
+                    _emit("</ul>")
+                    in_list = False
+                _emit(f"<h3>{_greek(stripped[4:])}</h3>")
+            elif stripped.startswith('## '):
+                if in_list:
+                    _emit("</ul>")
+                    in_list = False
+                _emit(f"<h2>{_greek(stripped[3:])}</h2>")
+            elif stripped.startswith('# '):
+                if in_list:
+                    _emit("</ul>")
+                    in_list = False
+                _emit(f"<h1>{_greek(stripped[2:])}</h1>")
+            elif stripped.startswith('- '):
+                if not in_list:
+                    _emit("<ul>")
+                    in_list = True
+                item = _greek(stripped[2:])
+                item = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', item)
+                item = re.sub(r'\*([^*]+?)\*', r'<em>\1</em>', item)
+                _emit(f"<li>{item}</li>")
+            else:
+                if in_list:
+                    _emit("</ul>")
+                    in_list = False
+                txt = _greek(stripped)
+                txt = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', txt)
+                txt = re.sub(r'\*([^*]+?)\*', r'<em>\1</em>', txt)
+                _emit(f"<p>{txt}</p>")
+        if in_list:
+            _emit("</ul>")
+
+    else:  # console
+        print(content)
+
+
+# ============================================================
+# Figure display (image or SVG with caption)
+# ============================================================
+
+def figure(content: str, caption: str = "", number: str = "",
+           width: str = "", alt: str = ""):
+    """Display a figure with optional caption and numbering.
+
+    Content can be an SVG string, an image URL/path, or raw HTML.
+
+    Args:
+        content: SVG string, image path/URL, or HTML content.
+        caption: Caption text below the figure.
+        number: Figure number (e.g. "1", "2a").
+        width: CSS width for the figure (e.g. "80%", "400px").
+        alt: Alt text for images.
+
+    Examples:
+        figure('<svg ...>...</svg>', "Beam element", "1", width="60%")
+        figure("diagram.png", "Cross section", "2", width="400px")
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        import base64
+        # For SVG/HTML send encoded, for file paths send as-is
+        if content.strip().startswith('<'):
+            encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+            _dsl(f"@@figure html|{encoded}|{_esc(caption)}|{_esc(number)}|{_esc(width)}")
+        else:
+            _dsl(f"@@figure src|{_esc(content)}|{_esc(caption)}|{_esc(number)}|{_esc(width)}")
+
+    elif mode == "standalone":
+        style = f' style="max-width:{width};"' if width else ""
+
+        if content.strip().startswith('<'):
+            # SVG or HTML content
+            fig_content = content
+            if width:
+                fig_content = f'<div style="max-width:{width};margin:0 auto;">{content}</div>'
+        else:
+            # Image file/URL
+            fig_content = f'<img src="{content}" alt="{alt}"{style}>'
+
+        cap_html = ""
+        if caption:
+            num_str = f"<strong>Figura {number}.</strong> " if number else ""
+            cap_html = (
+                f'<p style="font-size:9pt;text-align:center;color:#444;'
+                f'margin:4px 0 12px;font-style:italic;">{num_str}{_greek(caption)}</p>'
+            )
+
+        html = f'<div style="text-align:center;margin:12px 0;">{fig_content}</div>{cap_html}'
+        _emit(html)
+
+    else:  # console
+        num_str = f"Figure {number}: " if number else ""
+        cap_str = f" - {caption}" if caption else ""
+        if content.strip().startswith('<'):
+            print(f"[{num_str}SVG figure{cap_str}]")
+        else:
+            print(f"[{num_str}{content}{cap_str}]")
+
+
+# ============================================================
+# Paper configuration (for academic/publication layouts)
+# ============================================================
+
+_PAPER_CONFIG = {}
+
+
+def paper(size: str = "A4", margin: str = "20mm 18mm 25mm 18mm",
+          font: Optional[str] = None, fontsize: str = "10pt",
+          color: str = "#000", accent: str = "#e0c060",
+          background: str = "#fff", lineheight: float = 1.45,
+          columngap: str = "8mm", **kwargs):
+    """Configure paper layout for standalone HTML output.
+
+    Sets page dimensions, fonts, colors, and other print-ready styling.
+    Call this BEFORE any content functions.
+
+    Args:
+        size: Page size ("A4", "letter", or "WxH" custom).
+        margin: CSS margin (e.g. "20mm 18mm 25mm 18mm").
+        font: Font family (default: Georgia/serif).
+        fontsize: Base font size (e.g. "10pt", "9pt").
+        color: Text color.
+        accent: Accent color for headings, borders.
+        background: Background color.
+        lineheight: Line height multiplier.
+        columngap: Gap between columns.
+        **kwargs: Additional config (startpage, pagenumber, etc.)
+    """
+    _PAPER_CONFIG.update({
+        "size": size,
+        "margin": margin,
+        "font": font or '"Georgia", "Times New Roman", Times, serif',
+        "fontsize": fontsize,
+        "color": color,
+        "accent": accent,
+        "background": background,
+        "lineheight": lineheight,
+        "columngap": columngap,
+        **kwargs,
+    })
+
+    mode = _get_mode()
+    if mode == "hekatan":
+        parts = [f"{k}={_esc(str(v))}" for k, v in _PAPER_CONFIG.items()]
+        _dsl(f"@@paper {';'.join(parts)}")
+    elif mode == "standalone":
+        # Paper config is applied in _generate_html()
+        pass
+
+
+# ============================================================
+# Header / Footer (for academic paper layout)
+# ============================================================
+
+def header(left: str = "", right: str = "", barside: str = "left",
+           color: str = "", textcolor: str = "", **kwargs):
+    """Add a page header bar.
+
+    Args:
+        left: Left-aligned text (e.g. journal name).
+        right: Right-aligned text (e.g. volume info).
+        barside: Side of accent bar ("left" or "right").
+        color: Background color of the header bar.
+        textcolor: Text color.
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        parts = [f"left={_esc(left)}", f"right={_esc(right)}",
+                 f"barside={_esc(barside)}"]
+        if color:
+            parts.append(f"color={_esc(color)}")
+        if textcolor:
+            parts.append(f"textcolor={_esc(textcolor)}")
+        _dsl(f"@@header {';'.join(parts)}")
+
+    elif mode == "standalone":
+        accent = color or _PAPER_CONFIG.get("accent", "#e0c060")
+        txt_color = textcolor or "#333"
+        bar_css = f"border-left: 4px solid {accent};" if barside == "left" else f"border-right: 4px solid {accent};"
+        html = (
+            f'<div style="display:flex;justify-content:space-between;align-items:center;'
+            f'padding:6px 12px;margin-bottom:16px;font-size:8.5pt;color:{txt_color};{bar_css}'
+            f'background:linear-gradient(90deg,{accent}10,transparent);">'
+            f'<span>{_greek(left)}</span>'
+            f'<span>{_greek(right)}</span>'
+            f'</div>'
+        )
+        _emit(html)
+
+    else:
+        if left or right:
+            print(f"[HEADER] {left}  |  {right}")
+
+
+def footer(left: str = "", right: str = ""):
+    """Add a page footer.
+
+    Args:
+        left: Left text (e.g. page number).
+        right: Right text (e.g. DOI).
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        _dsl(f"@@footer left={_esc(left)};right={_esc(right)}")
+
+    elif mode == "standalone":
+        html = (
+            f'<div style="display:flex;justify-content:space-between;'
+            f'font-size:8pt;color:#666;border-top:1px solid #ccc;'
+            f'padding:6px 0;margin-top:20px;">'
+            f'<span>{_greek(left)}</span>'
+            f'<span>{_greek(right)}</span>'
+            f'</div>'
+        )
+        _emit(html)
+
+    else:
+        if left or right:
+            print(f"[FOOTER] {left}  |  {right}")
+
+
+# ============================================================
+# Author block (for academic papers)
+# ============================================================
+
+def author(name: str, affiliation: str = "", email: str = "",
+           photo: str = ""):
+    """Display an author block for academic papers.
+
+    Args:
+        name: Author full name.
+        affiliation: Institution / university.
+        email: Email address.
+        photo: Photo URL or path (optional).
+
+    Example:
+        author("Dr. Juan Pérez", "Universidad Nacional", "jperez@univ.edu")
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        _dsl(f"@@author {_esc(name)}|{_esc(affiliation)}|{_esc(email)}|{_esc(photo)}")
+
+    elif mode == "standalone":
+        photo_html = ""
+        if photo:
+            photo_html = (
+                f'<img src="{photo}" alt="{name}" '
+                f'style="width:60px;height:60px;border-radius:50%;object-fit:cover;margin-right:10px;">'
+            )
+        html = (
+            f'<div style="display:flex;align-items:center;margin:8px 0;font-size:9.5pt;">'
+            f'{photo_html}'
+            f'<div>'
+            f'<div style="font-weight:600;">{_greek(name)}</div>'
+        )
+        if affiliation:
+            html += f'<div style="color:#666;font-size:8.5pt;">{_greek(affiliation)}</div>'
+        if email:
+            html += f'<div style="color:#06d;font-size:8.5pt;">{email}</div>'
+        html += '</div></div>'
+        _emit(html)
+
+    else:
+        print(f"Author: {name}")
+        if affiliation:
+            print(f"  {affiliation}")
+        if email:
+            print(f"  {email}")
+
+
+# ============================================================
+# Abstract block (for academic papers)
+# ============================================================
+
+def abstract_block(content: str, keywords: Optional[List[str]] = None,
+                   lang: str = ""):
+    """Display an abstract block with optional keywords.
+
+    Args:
+        content: Abstract text.
+        keywords: List of keyword strings.
+        lang: Language label (e.g. "english", "español").
+
+    Example:
+        abstract_block(
+            "This paper presents the method of incompatible modes...",
+            keywords=["finite elements", "incompatible modes", "localization"],
+            lang="english"
+        )
+    """
+    mode = _get_mode()
+
+    if mode == "hekatan":
+        kw_str = ",".join(keywords) if keywords else ""
+        _dsl(f"@@abstract {_esc(lang)}|{_esc(content)}|{kw_str}")
+
+    elif mode == "standalone":
+        lang_label = f" ({lang})" if lang else ""
+        html = (
+            f'<div style="margin:12px 0;padding:10px 16px;'
+            f'border-left:3px solid {_PAPER_CONFIG.get("accent", "#e0c060")};'
+            f'background:#fafafa;font-size:9.5pt;">'
+            f'<p style="font-weight:700;margin-bottom:4px;">Abstract{lang_label}</p>'
+            f'<p style="text-align:justify;line-height:1.5;">{_greek(content)}</p>'
+        )
+        if keywords:
+            kw_html = "; ".join(f"<em>{_greek(k)}</em>" for k in keywords)
+            html += f'<p style="margin-top:6px;font-size:9pt;"><strong>Keywords:</strong> {kw_html}</p>'
+        html += '</div>'
+        _emit(html)
+
+    else:
+        print(f"\n--- Abstract{f' ({lang})' if lang else ''} ---")
+        print(content)
+        if keywords:
+            print(f"Keywords: {', '.join(keywords)}")
+        print("---\n")
 
 
 # ============================================================

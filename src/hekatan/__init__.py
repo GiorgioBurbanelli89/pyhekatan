@@ -16,7 +16,7 @@ Usage:
     show()  # Opens HTML in browser (standalone mode)
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 from hekatan.display import (
     # Core math
@@ -35,18 +35,28 @@ from hekatan.display import (
     limit_op,
     eq_num,
     formula,
+    # Rich equation blocks (Hekatan Calc style)
+    eq_block,
     # Layout
     columns,
     column,
     end_columns,
+    # Paper / academic layout
+    paper,
+    header,
+    footer,
+    author,
+    abstract_block,
     # Text & headings
     title,
     text,
     heading,
+    markdown,
     # Verification
     check,
     # Media & content
     image,
+    figure,
     note,
     code,
     hr,
