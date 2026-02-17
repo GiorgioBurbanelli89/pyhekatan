@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hekatan"
-version = "0.4.1"
+version = "0.6.0"
 description = "Python display library for engineering calculations - matrices, equations, formatted output"
 readme = "README.md"
 license = "MIT"

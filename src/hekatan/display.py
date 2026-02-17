@@ -2,9 +2,11 @@
 Core display functions for Hekatan.
 
 Each function works in 3 modes:
-  - HEKATAN mode: prints @@HEKATAN markers (detected by C# side)
+  - HEKATAN mode: emits HTML to stdout (captured by Hekatan Calc WPF/CLI)
   - STANDALONE mode: accumulates HTML, show() opens in browser
   - CONSOLE mode: ASCII formatted output
+
+v0.6.0 - Added: columns, check, image, note, code, hr, page_break, html_raw, formula
 """
 
 import os
@@ -33,6 +35,23 @@ def _get_mode() -> str:
     if _MODE is None:
         _MODE = _detect_mode()
     return _MODE
+
+
+_CSS_EMITTED = False  # Track if CSS was already printed in hekatan mode
+
+
+def _emit(html: str):
+    """Emit an HTML element: in hekatan mode print to stdout, in standalone accumulate."""
+    global _CSS_EMITTED
+    mode = _get_mode()
+    if mode == "hekatan":
+        # First call: emit CSS style block so Hekatan Calc renders elements correctly
+        if not _CSS_EMITTED:
+            _CSS_EMITTED = True
+            print(f"<style>\n{_CSS}\n</style>")
+        print(html)
+    else:
+        _BUFFER.append(html)
 
 
 def set_mode(mode: str):
@@ -65,14 +84,9 @@ def matrix(data: List[List[Any]], name: Optional[str] = None):
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        rows = ";".join(",".join(str(x) for x in row) for row in data)
-        marker = f"@@HEKATAN:MATRIX:{name or ''}[{rows}]"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         html = _matrix_to_html(data, name)
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         _matrix_to_console(data, name)
@@ -134,18 +148,12 @@ def eq(name: str, value: Any, unit: str = ""):
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        marker = f"@@HEKATAN:EQ:{name}={value}"
-        if unit:
-            marker += f"|{unit}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         display_name = _format_subscript(name)
         value_html = _format_expr(str(value))
         unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
         html = f'<div class="eq"><var>{display_name}</var> = <span class="val">{value_html}{unit_html}</span></div>'
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         unit_str = f" {unit}" if unit else ""
@@ -171,21 +179,13 @@ def var(name: str, value: Any, unit: str = "", desc: str = ""):
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        parts = [f"@@HEKATAN:VAR:{name}={value}"]
-        if unit:
-            parts[0] += f"|{unit}"
-        if desc:
-            parts[0] += f"|{desc}"
-        print(parts[0])
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         display_name = _format_subscript(name)
         value_html = _format_expr(str(value))
         unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
         desc_html = f' <span class="desc">{desc}</span>' if desc else ""
         html = f'<div class="eq"><var>{display_name}</var> = <span class="val">{value_html}{unit_html}</span>{desc_html}</div>'
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         unit_str = f" {unit}" if unit else ""
@@ -211,11 +211,7 @@ def fraction(numerator: Any, denominator: Any, name: Optional[str] = None):
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        marker = f"@@HEKATAN:FRAC:{name or ''}={numerator}/{denominator}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         num_html = _format_subscript(str(numerator))
         den_html = _format_subscript(str(denominator))
@@ -226,7 +222,7 @@ def fraction(numerator: Any, denominator: Any, name: Optional[str] = None):
             f'<span class="dvl">{den_html}</span>'
             f'</span></div>'
         )
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         prefix = f"{name} = " if name else ""
@@ -260,13 +256,7 @@ def integral(integrand: str, variable: str = "x",
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        marker = f"@@HEKATAN:INTEGRAL:{name or ''}={integrand}|{variable}"
-        if lower and upper:
-            marker += f"|{lower}|{upper}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         integrand_html = _format_subscript(integrand)
         var_html = _format_subscript(variable)
@@ -289,7 +279,7 @@ def integral(integrand: str, variable: str = "x",
             f'<span class="dot-sep">&middot;</span>'
             f'd<var>{var_html}</var></div>'
         )
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         prefix = f"{name} = " if name else ""
@@ -320,11 +310,7 @@ def derivative(func: str, variable: str = "x", order: int = 1,
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        marker = f"@@HEKATAN:DERIV:{name or ''}={func}|{variable}|{order}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         func_html = _format_subscript(func)
         var_html = _format_subscript(variable)
@@ -343,7 +329,7 @@ def derivative(func: str, variable: str = "x", order: int = 1,
             f'<span class="dvl">{den}</span>'
             f'</span></div>'
         )
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         prefix = f"{name} = " if name else ""
@@ -384,12 +370,7 @@ def partial(func: str, variable: Union[str, List[str]] = "x",
         total_order = order
         vars_str = [variable]
 
-    if mode == "hekatan":
-        v_list = ",".join(vars_str)
-        marker = f"@@HEKATAN:PARTIAL:{name or ''}={func}|{v_list}|{total_order}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         func_html = _format_subscript(func)
         pd = "\u2202"  # ∂
@@ -413,7 +394,7 @@ def partial(func: str, variable: Union[str, List[str]] = "x",
             f'<span class="dvl">{den}</span>'
             f'</span></div>'
         )
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         prefix = f"{name} = " if name else ""
@@ -448,13 +429,7 @@ def summation(expr: str, variable: str = "i",
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        marker = f"@@HEKATAN:SUM:{name or ''}={expr}|{variable}"
-        if lower and upper:
-            marker += f"|{lower}|{upper}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         expr_html = _format_subscript(expr)
 
@@ -482,7 +457,7 @@ def summation(expr: str, variable: str = "i",
             f'{sum_sym}'
             f'<var>{expr_html}</var></div>'
         )
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         prefix = f"{name} = " if name else ""
@@ -515,13 +490,7 @@ def product_op(expr: str, variable: str = "i",
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        marker = f"@@HEKATAN:PROD:{name or ''}={expr}|{variable}"
-        if lower and upper:
-            marker += f"|{lower}|{upper}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         expr_html = _format_subscript(expr)
 
@@ -548,7 +517,7 @@ def product_op(expr: str, variable: str = "i",
             f'{prod_sym}'
             f'<var>{expr_html}</var></div>'
         )
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         prefix = f"{name} = " if name else ""
@@ -578,12 +547,7 @@ def sqrt(expr: str, name: Optional[str] = None, index: Optional[int] = None):
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        idx = f"|{index}" if index else ""
-        marker = f"@@HEKATAN:SQRT:{name or ''}={expr}{idx}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         expr_html = _format_expr(expr)
 
@@ -603,7 +567,7 @@ def sqrt(expr: str, name: Optional[str] = None, index: Optional[int] = None):
             f'</span>'
             f'</div>'
         )
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         prefix = f"{name} = " if name else ""
@@ -637,13 +601,7 @@ def double_integral(integrand: str,
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        marker = (f"@@HEKATAN:DBLINT:{name or ''}={integrand}"
-                  f"|{var1}|{lower1 or ''}|{upper1 or ''}"
-                  f"|{var2}|{lower2 or ''}|{upper2 or ''}")
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         integrand_html = _format_subscript(integrand)
 
@@ -672,7 +630,7 @@ def double_integral(integrand: str,
             f'<span class="dot-sep">&middot;</span>'
             f'd<var>{var2_html}</var></div>'
         )
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         prefix = f"{name} = " if name else ""
@@ -703,12 +661,7 @@ def limit_op(expr: str, variable: str = "x", to: str = "0",
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        d = direction or ""
-        marker = f"@@HEKATAN:LIMIT:{name or ''}={expr}|{variable}|{to}|{d}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
         expr_html = _format_subscript(expr)
         var_html = _format_subscript(variable)
@@ -727,7 +680,7 @@ def limit_op(expr: str, variable: str = "x", to: str = "0",
             f'{lim_sym}'
             f'<var>{expr_html}</var></div>'
         )
-        _BUFFER.append(html)
+        _emit(html)
 
     else:  # console
         prefix = f"{name} = " if name else ""
@@ -744,7 +697,8 @@ def eq_num(tag: str):
     mode = _get_mode()
 
     if mode == "hekatan":
-        print(f"@@HEKATAN:EQNUM:{tag}")
+        html = f'<span class="eq-num">({tag})</span>'
+        _emit(html)
 
     elif mode == "standalone":
         html = f'<span class="eq-num">({tag})</span>'
@@ -771,11 +725,8 @@ def title(text_content: str, level: int = 1):
     mode = _get_mode()
     tag = f"h{min(level, 6)}"
 
-    if mode == "hekatan":
-        print(f"@@HEKATAN:TITLE:{level}|{text_content}")
-
-    elif mode == "standalone":
-        _BUFFER.append(f"<{tag}>{text_content}</{tag}>")
+    if mode in ("hekatan", "standalone"):
+        _emit(f"<{tag}>{text_content}</{tag}>")
 
     else:
         marker = "#" * level
@@ -805,12 +756,7 @@ def table(data: List[List[Any]], header: bool = True):
     """
     mode = _get_mode()
 
-    if mode == "hekatan":
-        rows_str = ";".join(",".join(str(x) for x in row) for row in data)
-        marker = f"@@HEKATAN:TABLE:{rows_str}"
-        print(marker)
-
-    elif mode == "standalone":
+    if mode in ("hekatan", "standalone"):
         html_parts = ['<table class="hekatan-table">']
 
         for r_idx, row in enumerate(data):
@@ -822,7 +768,7 @@ def table(data: List[List[Any]], header: bool = True):
             html_parts.append("</tr>")
 
         html_parts.append("</table>")
-        _BUFFER.append("".join(html_parts))
+        _emit("".join(html_parts))
 
     else:  # console
         if not data:
@@ -844,14 +790,328 @@ def text(content: str):
     """Display plain text or markdown."""
     mode = _get_mode()
 
-    if mode == "hekatan":
-        print(f"@@HEKATAN:TEXT:{content}")
-
-    elif mode == "standalone":
-        _BUFFER.append(f"<p>{_greek(content)}</p>")
+    if mode in ("hekatan", "standalone"):
+        _emit(f"<p>{_greek(content)}</p>")
 
     else:
         print(content)
+
+
+# ============================================================
+# Columns layout (new in 0.6.0)
+# ============================================================
+
+_COLUMNS_ACTIVE = False
+_COLUMNS_COUNT = 0
+
+
+def columns(n: int = 2):
+    """
+    Start a multi-column layout.
+
+    Args:
+        n: Number of columns (2-4 recommended)
+
+    Example:
+        columns(2)
+        eq("F", 25.5, "kN")
+        column()
+        eq("M", 100, "kN*m")
+        end_columns()
+    """
+    global _COLUMNS_ACTIVE, _COLUMNS_COUNT
+    mode = _get_mode()
+    _COLUMNS_ACTIVE = True
+    _COLUMNS_COUNT = n
+
+    if mode in ("hekatan", "standalone"):
+        width = 100 // n
+        html = (
+            f'<div class="columns-container" '
+            f'style="display:flex;gap:1em;flex-wrap:wrap;">'
+            f'<div class="column" style="flex:1;min-width:{width - 5}%;max-width:{width + 5}%;">'
+        )
+        _emit(html)
+    else:
+        print(f"--- Columns ({n}) ---")
+
+
+def column():
+    """
+    Start the next column in a multi-column layout.
+
+    Example:
+        columns(3)
+        text("Col 1 content")
+        column()
+        text("Col 2 content")
+        column()
+        text("Col 3 content")
+        end_columns()
+    """
+    mode = _get_mode()
+
+    if mode in ("hekatan", "standalone"):
+        width = 100 // max(_COLUMNS_COUNT, 2)
+        html = (
+            f'</div>'
+            f'<div class="column" style="flex:1;min-width:{width - 5}%;max-width:{width + 5}%;">'
+        )
+        _emit(html)
+    else:
+        print("---")
+
+
+def end_columns():
+    """End the multi-column layout."""
+    global _COLUMNS_ACTIVE, _COLUMNS_COUNT
+    mode = _get_mode()
+    _COLUMNS_ACTIVE = False
+    _COLUMNS_COUNT = 0
+
+    if mode in ("hekatan", "standalone"):
+        _emit('</div></div>')
+    else:
+        print("--- End Columns ---")
+
+
+# ============================================================
+# Design check (new in 0.6.0)
+# ============================================================
+
+def check(name: str, value: Any, limit: Any, unit: str = "",
+          condition: str = "<=", desc: str = ""):
+    """
+    Display a design verification check: value <= limit → ✓ or ✗
+
+    Args:
+        name: Variable name (e.g. "sigma")
+        value: Computed value
+        limit: Allowable limit
+        unit: Unit string
+        condition: Comparison operator ("<=", ">=", "<", ">", "==")
+        desc: Optional description
+
+    Example:
+        check("sigma", 150, 250, "MPa")           # 150 ≤ 250 → ✓
+        check("d", 500, 450, "mm", condition="<=") # 500 ≤ 450 → ✗
+    """
+    mode = _get_mode()
+
+    # Evaluate condition
+    ops = {
+        "<=": lambda a, b: a <= b,
+        ">=": lambda a, b: a >= b,
+        "<": lambda a, b: a < b,
+        ">": lambda a, b: a > b,
+        "==": lambda a, b: a == b,
+    }
+    op_symbols = {"<=": "≤", ">=": "≥", "<": "<", ">": ">", "==": "="}
+    passed = ops.get(condition, ops["<="])(float(value), float(limit))
+    symbol = op_symbols.get(condition, "≤")
+
+    if mode in ("hekatan", "standalone"):
+        display_name = _format_subscript(name)
+        unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
+        status_class = "ok" if passed else "err"
+        status_mark = "✓" if passed else "✗"
+        desc_html = f' <span class="desc">{desc}</span>' if desc else ""
+
+        html = (
+            f'<div class="eq">'
+            f'<var>{display_name}</var> = '
+            f'<span class="val">{_format_expr(str(value))}{unit_html}</span>'
+            f' {symbol} '
+            f'<span class="val">{_format_expr(str(limit))}{unit_html}</span>'
+            f' <span class="{status_class}"><b>{status_mark}</b></span>'
+            f'{desc_html}'
+            f'</div>'
+        )
+        _emit(html)
+
+    else:
+        mark = "OK" if passed else "FAIL"
+        unit_str = f" {unit}" if unit else ""
+        desc_str = f"  ({desc})" if desc else ""
+        print(f"{name} = {value}{unit_str} {symbol} {limit}{unit_str} → [{mark}]{desc_str}")
+
+
+# ============================================================
+# Image (new in 0.6.0)
+# ============================================================
+
+def image(src: str, alt: str = "", width: Optional[str] = None, caption: Optional[str] = None):
+    """
+    Display an image.
+
+    Args:
+        src: Image URL or file path
+        alt: Alt text
+        width: Optional width (e.g. "400px", "80%")
+        caption: Optional caption text below image
+
+    Example:
+        image("diagram.png", width="60%", caption="Figure 1: Beam diagram")
+    """
+    mode = _get_mode()
+
+    if mode in ("hekatan", "standalone"):
+        style = f' style="max-width:{width};"' if width else ' style="max-width:100%;"'
+        img_html = f'<img src="{src}" alt="{alt}"{style}>'
+        if caption:
+            html = (
+                f'<figure style="margin:12px 0;">'
+                f'{img_html}'
+                f'<figcaption style="font-size:9pt;color:#666;margin-top:4px;font-style:italic;">'
+                f'{caption}</figcaption></figure>'
+            )
+        else:
+            html = f'<div style="margin:8px 0;">{img_html}</div>'
+        _emit(html)
+
+    else:
+        cap = f" ({caption})" if caption else ""
+        print(f"[IMAGE: {src}{cap}]")
+
+
+# ============================================================
+# Note / callout (new in 0.6.0)
+# ============================================================
+
+def note(content: str, kind: str = "info"):
+    """
+    Display a styled callout/note.
+
+    Args:
+        content: Note text
+        kind: "info", "warning", "error", "success"
+
+    Example:
+        note("Check concrete cover requirements", "warning")
+    """
+    mode = _get_mode()
+
+    colors = {
+        "info":    ("#e3f2fd", "#1565c0", "#bbdefb", "ℹ"),
+        "warning": ("#fff3e0", "#e65100", "#ffcc80", "⚠"),
+        "error":   ("#fce4ec", "#c62828", "#ef9a9a", "✗"),
+        "success": ("#e8f5e9", "#2e7d32", "#a5d6a7", "✓"),
+    }
+    bg, fg, border_color, icon = colors.get(kind, colors["info"])
+
+    if mode in ("hekatan", "standalone"):
+        html = (
+            f'<div style="background:{bg};color:{fg};border-left:4px solid {border_color};'
+            f'padding:8px 12px;margin:8px 0;border-radius:4px;font-size:10pt;">'
+            f'<b>{icon}</b> {_greek(content)}</div>'
+        )
+        _emit(html)
+
+    else:
+        prefix = {"info": "INFO", "warning": "WARN", "error": "ERR", "success": "OK"}.get(kind, "NOTE")
+        print(f"[{prefix}] {content}")
+
+
+# ============================================================
+# Code block (new in 0.6.0)
+# ============================================================
+
+def code(content: str, lang: str = ""):
+    """
+    Display a formatted code block.
+
+    Args:
+        content: Code text
+        lang: Optional language hint for styling
+
+    Example:
+        code("import numpy as np\\na = np.array([1,2,3])", "python")
+    """
+    mode = _get_mode()
+
+    if mode in ("hekatan", "standalone"):
+        escaped = content.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        lang_class = f" code-{lang}" if lang else ""
+        html = f'<pre class="code-block{lang_class}" style="background:#f8f8f8;border-left:3px solid #3776ab;border-radius:3px;padding:6px 8px;margin:6px 0;font-family:Consolas,monospace;font-size:9pt;line-height:1.4;white-space:pre;overflow-x:auto;">{escaped}</pre>'
+        _emit(html)
+
+    else:
+        print(f"```{lang}")
+        print(content)
+        print("```")
+
+
+# ============================================================
+# Utility elements (new in 0.6.0)
+# ============================================================
+
+def hr():
+    """Display a horizontal rule."""
+    mode = _get_mode()
+    if mode in ("hekatan", "standalone"):
+        _emit('<hr style="margin:12px 0;border:none;border-top:1px solid #ddd;">')
+    else:
+        print("-" * 60)
+
+
+def page_break():
+    """Insert a page break (for print/PDF output)."""
+    mode = _get_mode()
+    if mode in ("hekatan", "standalone"):
+        _emit('<div style="page-break-before:always;"></div>')
+    else:
+        print("\n" + "=" * 60 + " [PAGE BREAK] " + "=" * 60 + "\n")
+
+
+def html_raw(content: str):
+    """
+    Emit raw HTML directly into the output.
+
+    Args:
+        content: Raw HTML string
+
+    Example:
+        html_raw('<div style="color:red;font-size:24px;">Custom HTML</div>')
+    """
+    mode = _get_mode()
+    if mode in ("hekatan", "standalone"):
+        _emit(content)
+    else:
+        print(f"[HTML] {content[:80]}...")
+
+
+# ============================================================
+# Formula display (new in 0.6.0)
+# ============================================================
+
+def formula(expression: str, name: Optional[str] = None, unit: str = ""):
+    """
+    Display a math formula with rich formatting.
+    Supports: subscripts (_), superscripts (^), Greek letters, operators.
+    This is for showing the formula expression itself (not computed values).
+
+    Args:
+        expression: Math expression string (e.g. "M_u / (phi * b * d^2)")
+        name: Optional result variable name
+        unit: Optional unit
+
+    Example:
+        formula("sigma_x = N / A + M * y / I_z")
+        formula("A_s * f_y / (0.85 * f_c * b)", "a", "mm")
+    """
+    mode = _get_mode()
+
+    if mode in ("hekatan", "standalone"):
+        name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
+        expr_html = _format_expr(expression)
+        unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
+        html = f'<div class="eq">{name_html}{expr_html}{unit_html}</div>'
+        _emit(html)
+
+    else:
+        prefix = f"{name} = " if name else ""
+        unit_str = f" [{unit}]" if unit else ""
+        print(f"{prefix}{expression}{unit_str}")
 
 
 # ============================================================
@@ -861,11 +1121,14 @@ def text(content: str):
 def show(filename: Optional[str] = None):
     """
     Generate HTML document and open in browser.
-    Only works in standalone mode.
+    Only works in standalone mode. In hekatan mode, HTML is already printed to stdout.
 
     Args:
         filename: Optional output file path. If None, uses temp file.
     """
+    if _get_mode() == "hekatan":
+        return  # HTML already sent to stdout via _emit()
+
     if not _BUFFER:
         print("hekatan: nothing to show")
         return
@@ -1411,5 +1674,36 @@ p { margin: 6px 0; }
 
 .hekatan-table tr:nth-child(even) {
     background: #fafafa;
+}
+
+/* ============================================
+   Columns layout
+   ============================================ */
+.columns-container {
+    display: flex;
+    gap: 1em;
+    flex-wrap: wrap;
+    margin: 8px 0;
+}
+
+.columns-container .column {
+    flex: 1;
+    min-width: 20%;
+}
+
+@media (max-width: 700px) {
+    .columns-container {
+        flex-direction: column !important;
+    }
+    .columns-container .column {
+        min-width: 100% !important;
+        max-width: 100% !important;
+    }
+}
+
+@media print {
+    .columns-container {
+        break-inside: avoid;
+    }
 }
 """
