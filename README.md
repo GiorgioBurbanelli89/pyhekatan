@@ -1,15 +1,23 @@
 # hekatan
 
-> Python display library for engineering calculations — equations, matrices, figures, academic papers
+> Python display library for engineering calculations — equations, matrices, figures, academic papers.
 
-[![PyPI](https://img.shields.io/pypi/v/hekatan.svg)](https://pypi.org/project/hekatan/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![PyPI version](https://img.shields.io/pypi/v/hekatan.svg)](https://pypi.org/project/hekatan/)
+[![Python](https://img.shields.io/pypi/pyversions/hekatan.svg)](https://pypi.org/project/hekatan/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Downloads](https://img.shields.io/pypi/dm/hekatan.svg)](https://pypi.org/project/hekatan/)
 
-## Install
+**hekatan** turns your Python engineering scripts into publication-quality HTML documents — with proper math notation, matrices with brackets, fraction bars, integrals, summations, design checks, and academic paper layouts. Zero dependencies. No LaTeX required.
+
+---
+
+## Installation
 
 ```bash
 pip install hekatan
 ```
+
+Requires Python 3.8+. No external dependencies.
 
 ## Quick Start
 
@@ -37,7 +45,7 @@ check("sigma", 150, 250, "MPa")  # 150 <= 250 -> OK
 show()  # Opens formatted HTML in your browser
 ```
 
-## Rich Equations (v0.8.0+)
+## Rich Equations
 
 The `eq_block()` function renders equations with fractions, integrals, summations, and equation numbers — using Hekatan Calc notation:
 
@@ -47,10 +55,10 @@ from hekatan import eq_block, show
 # Fractions: (numerator)/(denominator) with recursive nesting
 eq_block("k = (E * A)/(L)  (1)")
 
-# Integrals with limits: ∫_{lower}^{upper}
+# Integrals with limits
 eq_block("∫_{a}^{b} f(x)*dx = F(b) - F(a)  (5.5)")
 
-# Summation: Σ_{lower}^{upper}
+# Summation
 eq_block("A = Σ_{i=1}^{N} f_i * Delta*x  (5.2)")
 
 # Nested fractions + integrals
@@ -70,11 +78,11 @@ show()
 
 ### Equation Number Syntax
 
-Equation numbers are placed at the end with **2+ spaces** before the parenthesized number. Supports dotted numbers and letter suffixes:
+Equation numbers are placed at the end with **2+ spaces** before the parenthesized number:
 
 ```python
-eq_block("F = m*a  (1)")           # Simple: (1)
-eq_block("D = (E*h^3)/(12)  (1.3)")  # Dotted: (1.3)
+eq_block("F = m*a  (1)")              # Simple: (1)
+eq_block("D = (E*h^3)/(12)  (1.3)")   # Dotted: (1.3)
 eq_block("N_x = ∫ sigma_x*dz  (1.5a)")  # With suffix: (1.5a)
 ```
 
@@ -88,9 +96,9 @@ eq_block("N_x = ∫ sigma_x*dz  (1.5a)")  # With suffix: (1.5a)
 | `N_{xy}` | N with subscript xy | Braced subscript (any content) |
 | `∂^2M_x` | ∂²Mₓ | `^` takes digits, `_` takes letter |
 
-## Academic Paper Layout (v0.8.0)
+## Academic Paper Layout
 
-Create publication-quality documents with paper configuration, headers, footers, author blocks, abstracts, figures, and multi-column layouts:
+Create publication-quality documents with paper configuration, headers, footers, author blocks, abstracts, and multi-column layouts:
 
 ```python
 from hekatan import (
@@ -155,9 +163,9 @@ Each function works in **3 modes** (auto-detected):
 | **Standalone** | Regular Python script | `show()` generates HTML, opens in browser |
 | **Console** | Fallback | ASCII formatted output |
 
-Mode is auto-detected via `HEKATAN_RENDER=1` environment variable.
+Mode is auto-detected via `HEKATAN_RENDER=1` environment variable. You can force a mode with `set_mode("standalone")`, `set_mode("hekatan")`, or `set_mode("console")`.
 
-## All Functions
+## API Reference
 
 ### Core Math
 
@@ -184,7 +192,7 @@ Mode is auto-detected via `HEKATAN_RENDER=1` environment variable.
 | `sqrt(expr, name, index)` | Square/nth root | `sqrt("a^2 + b^2", "c")` |
 | `limit_op(expr, var, to)` | Limit expression | `limit_op("sin(x)/x", "x", "0")` |
 
-### Paper Layout (v0.8.0)
+### Paper Layout
 
 | Function | Description | Example |
 |----------|-------------|---------|
@@ -216,7 +224,7 @@ Mode is auto-detected via `HEKATAN_RENDER=1` environment variable.
 | `column()` | Next column | `column()` |
 | `end_columns()` | End columns | `end_columns()` |
 | `hr()` | Horizontal rule | `hr()` |
-| `page_break(left, right, ...)` | Page break with optional running header | `page_break(left="Title", right="15")` |
+| `page_break(left, right, ...)` | Page break with running header | `page_break(left="Title", right="15")` |
 | `html_raw(content)` | Raw HTML | `html_raw("<div>...</div>")` |
 | `eq_num(tag)` | Equation number | `eq_num("1.2")` |
 
@@ -230,23 +238,25 @@ Mode is auto-detected via `HEKATAN_RENDER=1` environment variable.
 
 ## Features
 
-- **Greek letters**: Automatically converts `alpha`, `sigma`, `phi`, `Delta`, etc. to symbols (α, σ, φ, Δ)
-- **Subscripts/superscripts**: `A_s` → A<sub>s</sub>, `x^2` → x², global processing of all occurrences
-- **Braced notation**: `A_{steel}`, `x^{2n}` for multi-character sub/superscripts
-- **Smart superscript**: `^` only consumes digits (`∂^2M` → ∂²M, not ∂²ᴹ), use `^{x}` for letters
-- **Word-boundary safe**: Greek replacement won't corrupt Spanish/Portuguese words (e.g. "comunidad" stays intact)
-- **Recursive fractions**: `(a + (b)/(c))/(d)` renders nested fraction bars correctly
-- **Integrals in eq_block**: `∫_{a}^{b}` renders with proper limits above/below the integral sign
-- **Summation in eq_block**: `Σ_{i=1}^{N}` renders with limits above/below the sigma
-- **Dotted equation numbers**: `(1.1)`, `(1.5a)`, `(2.3b)` all supported
-- **CSS columns**: Both flex-based (manual column breaks) and CSS multi-column (auto-flowing) layouts
-- **Column proportions**: `columns(2, "32:68")` for asymmetric layouts
-- **Page breaks with headers**: `page_break(left="Title", right="15")` for running headers
-- **Print-ready**: `@page` CSS rules for PDF export via browser print
+- **Zero dependencies** — pure Python, no NumPy/LaTeX/MathJax required
+- **Greek letters** — auto-converts `alpha`, `sigma`, `phi`, `Delta`, etc. to symbols
+- **Subscripts/superscripts** — `A_s` renders as subscript, `x^2` as superscript
+- **Braced notation** — `A_{steel}`, `x^{2n}` for multi-character sub/superscripts
+- **Smart superscript** — `^` only consumes digits (`∂^2M` stays correct), use `^{x}` for letters
+- **Word-boundary safe** — Greek replacement won't corrupt Spanish/Portuguese words
+- **Recursive fractions** — `(a + (b)/(c))/(d)` renders nested fraction bars
+- **Integrals** — `∫_{a}^{b}` renders with proper limits above/below
+- **Summation** — `Σ_{i=1}^{N}` renders with limits above/below
+- **Equation numbers** — `(1.1)`, `(1.5a)`, `(2.3b)` all supported
+- **CSS columns** — flex-based (manual breaks) and CSS multi-column (auto-flow) layouts
+- **Column proportions** — `columns(2, "32:68")` for asymmetric layouts
+- **Page breaks with headers** — running headers on each page
+- **Print-ready** — `@page` CSS rules for PDF export via browser print
+- **Design checks** — pass/fail verification with color-coded output
 
 ## Integration with Hekatan Calc
 
-When used inside a Hekatan Calc `.hcalc` document:
+When used inside a [Hekatan Calc](https://github.com/nickkuijpers/Hekatan-Calc-1.0.0) `.hcalc` document:
 
 ```
 # My Calculation
@@ -263,6 +273,15 @@ eq_block("sigma = (M * y)/(I_z)  (1)")
 
 The output is automatically formatted with Hekatan Calc's CSS — matrices with brackets, equations with proper serif typography, fraction bars, integral symbols, and more.
 
+## Example: FEA Slab Analysis
+
+The `examples/` directory includes a full finite element analysis of a rectangular slab using the BFS plate bending element (585 lines). It demonstrates variables, equations, matrices, tables, partial derivatives, double integrals, and design checks — all rendered as a single HTML document.
+
+```bash
+cd examples
+python rectangular_slab_fea.py
+```
+
 ## License
 
-MIT
+[MIT](LICENSE)
