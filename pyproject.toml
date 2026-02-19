@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hekatan"
-version = "0.8.0"
-description = "Python display library for engineering calculations - matrices, equations, formatted output"
+version = "0.9.0"
+description = "Python display library for engineering calculations - matrices, equations, symbolic math with SymPy"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.8"
@@ -27,6 +27,11 @@ classifiers = [
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
+
+[project.optional-dependencies]
+sympy = ["sympy>=1.12"]
+jupyter = ["ipython>=7.0", "jupyter"]
+all = ["sympy>=1.12", "ipython>=7.0", "jupyter"]
 
 [project.urls]
 Homepage = "https://github.com/GiorgioBurbanelli89/pyhekatan"

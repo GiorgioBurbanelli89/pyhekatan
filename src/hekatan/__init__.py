@@ -16,7 +16,7 @@ Usage:
     show()  # Opens HTML in browser (standalone mode)
 """
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 from hekatan.display import (
     # Core math
@@ -67,3 +67,35 @@ from hekatan.display import (
     clear,
     set_mode,
 )
+
+# Calc engine — natural math expression evaluator
+from hekatan.calc_engine import calc, calc_clear, run
+
+# SymPy bridge — symbolic math with HTML rendering (optional, requires sympy)
+try:
+    from hekatan.sympy_bridge import (
+        sym_integral,
+        sym_diff,
+        sym_partial,
+        sym_limit,
+        sym_solve,
+        sym_simplify,
+        sym_factor,
+        sym_expand,
+        sym_series,
+        sym_matrix,
+        sym_eq,
+        sym_subs,
+        sym_summation,
+        sym_product,
+        sym_double_integral,
+        symbols,
+    )
+except ImportError:
+    pass  # SymPy not installed
+
+# Jupyter cell magic — %%hekatan (auto-registers if in Jupyter)
+try:
+    from hekatan.magic import hekatan as _hekatan_magic  # noqa: F401
+except ImportError:
+    pass  # Not in Jupyter

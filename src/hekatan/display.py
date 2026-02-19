@@ -23,8 +23,23 @@ _MODE = None  # 'hekatan', 'standalone', 'console'
 _BUFFER = []  # Accumulated elements for standalone mode
 
 
+def _in_jupyter() -> bool:
+    """Check if running inside Jupyter (notebook or lab)."""
+    try:
+        from IPython import get_ipython
+        shell = get_ipython()
+        if shell is None:
+            return False
+        return shell.__class__.__name__ in ('ZMQInteractiveShell', 'Shell')
+    except (ImportError, NameError):
+        return False
+
+
 def _detect_mode() -> str:
-    """Auto-detect rendering mode."""
+    """Auto-detect rendering mode.
+
+    Jupyter is treated as 'standalone' — _emit() handles the display difference.
+    """
     if os.environ.get("HEKATAN_RENDER") == "1":
         return "hekatan"
     return "standalone"
@@ -37,9 +52,32 @@ def _get_mode() -> str:
     return _MODE
 
 
+_JUPYTER_CSS_INJECTED = False
+
+
+def _get_css() -> str:
+    """Return CSS <style> tag if not yet injected in Jupyter. Empty string if already done."""
+    global _JUPYTER_CSS_INJECTED
+    if not _JUPYTER_CSS_INJECTED:
+        _JUPYTER_CSS_INJECTED = True
+        return f'<style>{_CSS}</style>'
+    return ''
+
+
 def _emit(html: str):
-    """Emit an HTML element for standalone mode only."""
-    _BUFFER.append(html)
+    """Emit an HTML element.
+
+    In Jupyter: display(HTML(...)) directly per element.
+    In standalone: buffer for later show().
+    """
+    if _in_jupyter():
+        from IPython.display import display, HTML as _HTML
+        css = _get_css()
+        if css:
+            display(_HTML(css))
+        display(_HTML(f'<div class="hekatan-doc">{html}</div>'))
+    else:
+        _BUFFER.append(html)
 
 
 def _dsl(cmd: str):
@@ -48,16 +86,26 @@ def _dsl(cmd: str):
 
 
 def set_mode(mode: str):
-    """Force a specific mode: 'hekatan', 'standalone', or 'console'."""
+    """Force a specific mode: 'hekatan', 'standalone', or 'console'.
+
+    Note: Jupyter is auto-detected inside _emit(). In Jupyter, use 'standalone'.
+    """
     global _MODE
+    if mode == "jupyter":
+        mode = "standalone"  # Jupyter is handled by _emit() auto-detection
     if mode not in ("hekatan", "standalone", "console"):
         raise ValueError(f"Invalid mode: {mode}. Use 'hekatan', 'standalone', or 'console'.")
     _MODE = mode
 
 
 def clear():
-    """Clear the accumulated buffer."""
+    """Clear the accumulated buffer and calc symbol table."""
     _BUFFER.clear()
+    try:
+        from hekatan.calc_engine import calc_clear as _cc
+        _cc()
+    except ImportError:
+        pass
 
 
 # ============================================================
@@ -101,18 +149,25 @@ def matrix(data: List[List[Any]], name: Optional[str] = None):
 
 
 def _matrix_to_html(data: List[List[Any]], name: Optional[str] = None) -> str:
-    """Generate HTML for a matrix using Hekatan CSS classes."""
+    """Generate HTML for a matrix using CSS grid (avoids Jupyter table conflicts)."""
+    ncols = max(len(row) for row in data) if data else 1
     rows_html = []
     for row in data:
-        cells = "".join(f'<td class="td">{_format_subscript(str(x))}</td>' for x in row)
-        rows_html.append(f'<tr class="tr"><td class="td"></td>{cells}<td class="td"></td></tr>')
+        cells = "".join(
+            f'<span class="mc">{_format_subscript(str(x))}</span>' for x in row
+        )
+        rows_html.append(f'<span class="mr">{cells}</span>')
 
-    table = f'<table class="matrix">{"".join(rows_html)}</table>'
+    grid = (
+        f'<span class="matrix" style="grid-template-columns:repeat({ncols},auto);">'
+        f'{"".join(rows_html)}'
+        f'</span>'
+    )
 
     if name:
         display_name = _format_subscript(name)
-        return f'<div class="eq"><var>{display_name}</var> = {table}</div>'
-    return f'<div class="eq">{table}</div>'
+        return f'<div class="eq"><var>{display_name}</var> = {grid}</div>'
+    return f'<div class="eq">{grid}</div>'
 
 
 def _matrix_to_console(data: List[List[Any]], name: Optional[str] = None):
@@ -284,26 +339,65 @@ def integral(integrand: str, variable: str = "x",
 
     elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
-        integrand_html = _format_subscript(integrand)
+
+        # Use AST renderer for the integrand (converts *, ^, fractions properly)
+        try:
+            from hekatan.calc_engine import _expr_to_html
+            integrand_html = _expr_to_html(integrand)
+        except (ImportError, Exception):
+            integrand_html = _format_expr(integrand)
+
         var_html = _format_subscript(variable)
 
+        # Build the integral symbol with limits
         if lower and upper:
+            # Format limits using AST renderer too
+            try:
+                from hekatan.calc_engine import _expr_to_html
+                lower_html = _expr_to_html(lower)
+                upper_html = _expr_to_html(upper)
+            except (ImportError, Exception):
+                lower_html = _format_subscript(lower)
+                upper_html = _format_subscript(upper)
+
             integral_sym = (
                 f'<span class="nary-wrap">'
-                f'<span class="nary-sup">{_format_subscript(upper)}</span>'
+                f'<span class="nary-sup">{upper_html}</span>'
                 f'<span class="nary">&#8747;</span>'
-                f'<span class="nary-sub">{_format_subscript(lower)}</span>'
+                f'<span class="nary-sub">{lower_html}</span>'
+                f'</span>'
+            )
+        elif lower:
+            try:
+                from hekatan.calc_engine import _expr_to_html
+                lower_html = _expr_to_html(lower)
+            except (ImportError, Exception):
+                lower_html = _format_subscript(lower)
+            integral_sym = (
+                f'<span class="nary-wrap">'
+                f'<span class="nary">&#8747;</span>'
+                f'<span class="nary-sub">{lower_html}</span>'
                 f'</span>'
             )
         else:
-            integral_sym = '<span class="nary">&#8747;</span>'
+            integral_sym = (
+                f'<span class="nary-wrap">'
+                f'<span class="nary">&#8747;</span>'
+                f'</span>'
+            )
+
+        # Build: name = ∫ (integrand) dx  — parentheses for compound expressions
+        has_additive = any(c in integrand for c in ('+', '-')) and integrand.strip()[0] != '-'
+        if has_additive:
+            body = f'({integrand_html})'
+        else:
+            body = integrand_html
 
         html = (
             f'<div class="eq">{name_html}'
             f'{integral_sym}'
-            f'<var>{integrand_html}</var>'
-            f'<span class="dot-sep">&middot;</span>'
-            f'd<var>{var_html}</var></div>'
+            f'<span>{body}\u2009'
+            f'<var>d</var><var>{var_html}</var></span></div>'
         )
         _emit(html)
 
@@ -343,23 +437,52 @@ def derivative(func: str, variable: str = "x", order: int = 1,
 
     elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
-        func_html = _format_subscript(func)
         var_html = _format_subscript(variable)
 
-        if order == 1:
-            num = f'd<var>{func_html}</var>'
-            den = f'd<var>{var_html}</var>'
-        else:
-            num = f'd<sup>{order}</sup><var>{func_html}</var>'
-            den = f'd<var>{var_html}</var><sup>{order}</sup>'
+        # Detect if func is a compound expression (operators, long)
+        _is_compound = any(c in func for c in ('+', '-', '*', '/')) or len(func) > 6
 
-        html = (
-            f'<div class="eq">{name_html}'
-            f'<span class="dvc">'
-            f'<span class="dvl">{num}</span>'
-            f'<span class="dvl">{den}</span>'
-            f'</span></div>'
-        )
+        if _is_compound:
+            # Compound: d/dx (expr) — operator fraction + argument outside
+            try:
+                from hekatan.calc_engine import _expr_to_html
+                func_display = _expr_to_html(func)
+            except (ImportError, Exception):
+                func_display = _format_expr(func)
+
+            if order == 1:
+                num = 'd'
+                den = f'd<var>{var_html}</var>'
+            else:
+                num = f'd<sup>{order}</sup>'
+                den = f'd<var>{var_html}</var><sup>{order}</sup>'
+
+            html = (
+                f'<div class="eq">{name_html}'
+                f'<span class="dvc">'
+                f'<span class="dvl">{num}</span>'
+                f'<span class="dvl">{den}</span>'
+                f'</span>'
+                f'\u2009({func_display})'
+                f'</div>'
+            )
+        else:
+            # Simple: df/dx — all inside the fraction
+            func_html = _format_subscript(func)
+            if order == 1:
+                num = f'd<var>{func_html}</var>'
+                den = f'd<var>{var_html}</var>'
+            else:
+                num = f'd<sup>{order}</sup><var>{func_html}</var>'
+                den = f'd<var>{var_html}</var><sup>{order}</sup>'
+
+            html = (
+                f'<div class="eq">{name_html}'
+                f'<span class="dvc">'
+                f'<span class="dvl">{num}</span>'
+                f'<span class="dvl">{den}</span>'
+                f'</span></div>'
+            )
         _emit(html)
 
     else:  # console
@@ -409,28 +532,60 @@ def partial(func: str, variable: Union[str, List[str]] = "x",
 
     elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
-        func_html = _format_subscript(func)
         pd = "\u2202"  # ∂
 
-        if total_order == 1:
-            num = f'{pd}<var>{func_html}</var>'
-            den = f'{pd}<var>{_format_subscript(vars_str[0])}</var>'
-        elif len(vars_str) == 1:
-            num = f'{pd}<sup>{total_order}</sup><var>{func_html}</var>'
-            den = f'{pd}<var>{_format_subscript(vars_str[0])}</var><sup>{total_order}</sup>'
-        else:
-            # Mixed: ∂²f / ∂x∂y
-            num = f'{pd}<sup>{total_order}</sup><var>{func_html}</var>'
-            den_parts = "".join(f'{pd}<var>{_format_subscript(v)}</var>' for v in vars_str)
-            den = den_parts
+        # Detect if func is a compound expression
+        _is_compound = any(c in func for c in ('+', '-', '*', '/')) or len(func) > 6
 
-        html = (
-            f'<div class="eq">{name_html}'
-            f'<span class="dvc">'
-            f'<span class="dvl">{num}</span>'
-            f'<span class="dvl">{den}</span>'
-            f'</span></div>'
-        )
+        if _is_compound:
+            # Compound: ∂/∂x (expr) — operator fraction + argument outside
+            try:
+                from hekatan.calc_engine import _expr_to_html
+                func_display = _expr_to_html(func)
+            except (ImportError, Exception):
+                func_display = _format_expr(func)
+
+            if total_order == 1:
+                num = pd
+                den = f'{pd}<var>{_format_subscript(vars_str[0])}</var>'
+            elif len(vars_str) == 1:
+                num = f'{pd}<sup>{total_order}</sup>'
+                den = f'{pd}<var>{_format_subscript(vars_str[0])}</var><sup>{total_order}</sup>'
+            else:
+                num = f'{pd}<sup>{total_order}</sup>'
+                den_parts = "".join(f'{pd}<var>{_format_subscript(v)}</var>' for v in vars_str)
+                den = den_parts
+
+            html = (
+                f'<div class="eq">{name_html}'
+                f'<span class="dvc">'
+                f'<span class="dvl">{num}</span>'
+                f'<span class="dvl">{den}</span>'
+                f'</span>'
+                f'\u2009({func_display})'
+                f'</div>'
+            )
+        else:
+            # Simple: ∂f/∂x — all inside the fraction
+            func_html = _format_subscript(func)
+            if total_order == 1:
+                num = f'{pd}<var>{func_html}</var>'
+                den = f'{pd}<var>{_format_subscript(vars_str[0])}</var>'
+            elif len(vars_str) == 1:
+                num = f'{pd}<sup>{total_order}</sup><var>{func_html}</var>'
+                den = f'{pd}<var>{_format_subscript(vars_str[0])}</var><sup>{total_order}</sup>'
+            else:
+                num = f'{pd}<sup>{total_order}</sup><var>{func_html}</var>'
+                den_parts = "".join(f'{pd}<var>{_format_subscript(v)}</var>' for v in vars_str)
+                den = den_parts
+
+            html = (
+                f'<div class="eq">{name_html}'
+                f'<span class="dvc">'
+                f'<span class="dvl">{num}</span>'
+                f'<span class="dvl">{den}</span>'
+                f'</span></div>'
+            )
         _emit(html)
 
     else:  # console
@@ -1281,7 +1436,12 @@ def formula(expression: str, name: Optional[str] = None, unit: str = ""):
 
     elif mode == "standalone":
         name_html = f'<var>{_format_subscript(name)}</var> = ' if name else ""
-        expr_html = _format_expr(expression)
+        # Use AST renderer for proper sqrt, fractions, superscripts
+        try:
+            from hekatan.calc_engine import _expr_to_html
+            expr_html = _expr_to_html(expression)
+        except (ImportError, Exception):
+            expr_html = _format_expr(expression)
         unit_html = f'\u2009<i>{_format_unit(unit)}</i>' if unit else ""
         html = f'<div class="eq">{name_html}{expr_html}{unit_html}</div>'
         _emit(html)
@@ -2109,44 +2269,42 @@ h3 {
 p { margin: 6px 0; }
 
 /* ============================================
-   Equation line (.eq) - Georgia Pro serif font
+   Equation line (.eq) - LaTeX-like math font
    ============================================ */
-.eq, table.matrix {
-    font-family: 'Georgia Pro', 'Century Schoolbook', 'Times New Roman', Times, serif;
+.eq, .matrix {
+    font-family: 'MJXTEX', 'STIX Two Math', 'Cambria Math', 'Latin Modern Math', 'Times New Roman', serif;
 }
 
 .eq {
-    font-size: 11pt;
+    font-size: 12pt;
     line-height: 2;
-    margin: 2px 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
+    margin: 4px 0;
+    color: #000;
 }
 
 .eq var {
-    color: #06d;
+    font-family: 'MJXTEX-I', 'MJXTEX', 'STIX Two Math', 'Cambria Math', 'Latin Modern Math', 'Times New Roman', serif;
+    color: #000;
     font-size: 105%;
     font-style: italic;
 }
 
 .eq i {
-    color: #059669;
-    font-style: normal;
-    font-size: 95%;
-    font-weight: 500;
+    color: #000;
+    font-style: italic;
+    font-size: 100%;
+    font-weight: normal;
 }
 
 .eq b {
     font-weight: 600;
-    color: #1a1a1a;
+    color: #000;
 }
 
 .eq sub {
-    font-family: Calibri, Candara, Corbel, sans-serif;
-    font-size: 80%;
-    vertical-align: -18%;
+    font-family: 'STIX Two Math', 'Cambria Math', 'Latin Modern Math', 'Times New Roman', serif;
+    font-size: 75%;
+    vertical-align: -20%;
     margin-left: 1pt;
 }
 
@@ -2154,7 +2312,7 @@ p { margin: 6px 0; }
     display: inline-block;
     margin-left: 1pt;
     margin-top: -3pt;
-    font-size: 75%;
+    font-size: 70%;
 }
 
 .eq small {
@@ -2181,57 +2339,29 @@ p { margin: 6px 0; }
 }
 
 /* ============================================
-   Matrix with bracket borders
+   Matrix with bracket borders (CSS grid)
    ============================================ */
 .matrix {
-    display: inline-table;
-    border-collapse: collapse;
+    display: inline-grid !important;
+    gap: 0;
     margin: 4px 2px;
     vertical-align: middle;
+    border-left: solid 1.5pt black;
+    border-right: solid 1.5pt black;
+    border-radius: 3px;
+    padding: 2pt 5pt;
 }
 
-.matrix .tr {
-    display: table-row;
+.matrix .mr {
+    display: contents;
 }
 
-.matrix .td {
+.matrix .mc {
     white-space: nowrap;
-    padding: 0 2pt 0 2pt;
+    padding: 1pt 5pt;
     min-width: 10pt;
-    display: table-cell;
     text-align: center;
     font-size: 10pt;
-}
-
-/* Left and right bracket columns (empty cells) */
-.matrix .td:first-child,
-.matrix .td:last-child {
-    width: 0.75pt;
-    min-width: 0.75pt;
-    max-width: 0.75pt;
-    padding: 0 1pt 0 1pt;
-}
-
-/* Left bracket border */
-.matrix .td:first-child {
-    border-left: solid 1pt black;
-}
-
-/* Right bracket border */
-.matrix .td:last-child {
-    border-right: solid 1pt black;
-}
-
-/* Top bracket borders */
-.matrix .tr:first-child .td:first-child,
-.matrix .tr:first-child .td:last-child {
-    border-top: solid 1pt black;
-}
-
-/* Bottom bracket borders */
-.matrix .tr:last-child .td:first-child,
-.matrix .tr:last-child .td:last-child {
-    border-bottom: solid 1pt black;
 }
 
 /* ============================================
@@ -2277,13 +2407,17 @@ p { margin: 6px 0; }
    Integral / Nary operators
    ============================================ */
 .nary {
-    color: #C080F0;
-    font-size: 240%;
-    font-family: 'Georgia Pro Light', 'Georgia Pro', Georgia, serif;
-    font-weight: 200;
-    line-height: 80%;
+    color: #000;
+    font-size: 100%;
+    font-family: 'MJXTEX-S2', 'MJXTEX-S1', 'MJXTEX', 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', 'Times New Roman', serif;
+    font-weight: normal;
+    -webkit-text-stroke: 0.2px white;
+    paint-order: stroke fill;
+    transform: translateX(-5px);
+    line-height: 1;
     display: block;
-    margin: -1pt 1pt 3pt 1pt;
+    margin: 0;
+    padding: 0;
 }
 
 .nary-wrap {
@@ -2291,18 +2425,37 @@ p { margin: 6px 0; }
     flex-direction: column;
     align-items: center;
     vertical-align: middle;
-    margin: 0 2px;
+    margin: 0 -2px;
+    padding-left: 8px;
+    line-height: 1;
+}
+
+/* Tighten consecutive integrals (double/triple) */
+.nary-wrap + .nary-wrap {
+    margin-left: -4px;
 }
 
 .nary-sup {
-    font-size: 70%;
+    font-size: 75%;
     line-height: 1;
     order: -1;
+    color: #000;
+    font-family: 'MJXTEX', 'STIX Two Math', 'Cambria Math', 'Latin Modern Math', 'Times New Roman', serif;
+    min-height: 1.1em;
+    padding-bottom: 10px;
+    align-self: center;
+    transform: translateX(6px);
 }
 
 .nary-sub {
-    font-size: 70%;
+    font-size: 75%;
     line-height: 1;
+    color: #000;
+    font-family: 'MJXTEX', 'STIX Two Math', 'Cambria Math', 'Latin Modern Math', 'Times New Roman', serif;
+    min-height: 1.1em;
+    padding-top: 10px;
+    align-self: center;
+    transform: translateX(-8px);
 }
 
 .dot-sep {
@@ -2315,8 +2468,8 @@ p { margin: 6px 0; }
 .eq-num {
     margin-left: auto;
     padding-right: 8px;
-    font-size: 10pt;
-    color: #666;
+    font-size: 11pt;
+    color: #000;
 }
 
 /* ============================================
